@@ -1,0 +1,85 @@
+@model VehiclesIndexViewModel
+@{
+    ViewData["Title"] = "Araçlar";
+}
+
+@if (TempData["Success"] is string ok)
+{
+    <div class="alert alert-success py-2">@ok</div>
+}
+@if (TempData["Error"] is string err)
+{
+    <div class="alert alert-danger py-2">@err</div>
+}
+
+@if (Model.CustomerId.HasValue)
+{
+    <a asp-controller="Customers" asp-action="Edit" asp-route-id="@Model.CustomerId" class="text-decoration-none small text-muted d-inline-block mb-2">← Müşteriye dön</a>
+}
+
+<div class="d-flex justify-content-between align-items-start mb-4 flex-wrap gap-3">
+    <div>
+        <h1 class="page-title">
+            @(Model.CustomerId.HasValue ? $"{Model.CustomerName}'nin Araçları" : "Araçlar")
+        </h1>
+        <p class="text-muted mb-0">@Model.Items.Count kayıt</p>
+    </div>
+    <a asp-action="Create" asp-route-customerId="@Model.CustomerId" class="btn btn-primary btn-sm px-3" style="background:#2f4a86;border:0">
+        + Yeni Araç
+    </a>
+</div>
+
+<form method="get" class="card-panel p-3 mb-3">
+    <input type="hidden" name="customerId" value="@Model.CustomerId" />
+    <div class="row g-2 align-items-end">
+        <div class="col-md-8">
+            <label class="form-label small fw-semibold">Ara</label>
+            <input type="text" name="search" value="@Model.Search" class="form-control" placeholder="Plaka, marka, model veya müşteri" />
+        </div>
+        <div class="col-md-4">
+            <button type="submit" class="btn btn-primary w-100" style="background:#2f4a86;border:0">Ara</button>
+        </div>
+    </div>
+</form>
+
+<div class="card-panel overflow-hidden">
+    <div class="table-responsive">
+        <table class="table table-hover mb-0 align-middle">
+            <thead class="table-light">
+                <tr>
+                    <th>Plaka</th>
+                    <th>Marka / Model</th>
+                    <th>Yıl</th>
+                    <th>Müşteri</th>
+                    <th class="text-end" style="width:260px">İşlem</th>
+                </tr>
+            </thead>
+            <tbody>
+            @if (Model.Items.Count == 0)
+            {
+                <tr><td colspan="5" class="text-center text-muted py-4">Kayıt bulunamadı.</td></tr>
+            }
+            @foreach (var v in Model.Items)
+            {
+                <tr>
+                    <td class="fw-semibold">@v.Plate</td>
+                    <td>@v.Brand @v.Model</td>
+                    <td>@(v.Year?.ToString() ?? "-")</td>
+                    <td>
+                        <a asp-controller="Customers" asp-action="Edit" asp-route-id="@v.CustomerId" class="text-decoration-none">@v.CustomerName</a>
+                    </td>
+                    <td class="text-end">
+                        <a asp-action="Edit" asp-route-id="@v.Id" class="btn btn-sm btn-outline-primary">Düzenle</a>
+                        <a asp-action="Transfer" asp-route-id="@v.Id" class="btn btn-sm btn-outline-secondary">Devret</a>
+                        <form asp-action="Delete" asp-route-id="@v.Id" method="post" class="d-inline"
+                              onsubmit="return confirm('Bu araç silinsin mi?');">
+                            @Html.AntiForgeryToken()
+                            <button type="submit" class="btn btn-sm btn-outline-danger">Sil</button>
+                        </form>
+                    </td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    </div>
+</div>

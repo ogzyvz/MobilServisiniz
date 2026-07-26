@@ -1,0 +1,103 @@
+@model StockReportViewModel
+@{
+    ViewData["Title"] = "Stok Raporu";
+    ViewData["Subtitle"] = $"{Model.TotalItems} ürün · Envanter değeri {Model.TotalStockValue:N2} ₺ · {Model.LowStockCount} düşük stok";
+}
+
+<partial name="_ReportHeader" />
+
+<form method="get" class="card-panel p-3 mb-3 no-print">
+    <div class="row g-2 align-items-end">
+        <div class="col-md-4">
+            <label class="form-label small fw-semibold">Kategori</label>
+            <select name="category" class="form-select" onchange="this.form.submit()">
+                <option value="">Tüm kategoriler</option>
+                @foreach (var c in Model.Categories)
+                {
+                    if (Model.CategoryFilter == c.Code)
+                    {
+                        <option value="@c.Code" selected="selected">@c.Label</option>
+                    }
+                    else
+                    {
+                        <option value="@c.Code">@c.Label</option>
+                    }
+                }
+            </select>
+        </div>
+        <div class="col-md-3">
+            <label class="form-label small fw-semibold">Kataloğa Ekleniş (Başlangıç)</label>
+            <input type="date" name="from" value="@Model.DateFrom?.ToString("yyyy-MM-dd")" class="form-control" />
+        </div>
+        <div class="col-md-3">
+            <label class="form-label small fw-semibold">Kataloğa Ekleniş (Bitiş)</label>
+            <input type="date" name="to" value="@Model.DateTo?.ToString("yyyy-MM-dd")" class="form-control" />
+        </div>
+        <div class="col-md-2">
+            <button type="submit" class="btn btn-primary w-100">Filtrele</button>
+        </div>
+    </div>
+</form>
+
+<div class="row g-3 mb-3 no-print">
+    <div class="col-md-4"><div class="stat-card"><div class="label">Toplam Ürün</div><div class="value" style="font-size:1.4rem">@Model.TotalItems</div></div></div>
+    <div class="col-md-4"><div class="stat-card"><div class="label">Envanter Değeri</div><div class="value" style="font-size:1.4rem">@Model.TotalStockValue.ToString("N2") ₺</div></div></div>
+    <div class="col-md-4"><div class="stat-card"><div class="label">Düşük Stok</div><div class="value text-danger" style="font-size:1.4rem">@Model.LowStockCount</div></div></div>
+</div>
+
+<div class="card-panel overflow-hidden report-table">
+    <div class="table-responsive">
+        <table class="table table-hover mb-0 align-middle">
+            <thead class="table-light">
+                <tr>
+                    <th>Ürün</th>
+                    <th>Kod</th>
+                    <th>Kategori</th>
+                    <th class="text-end">Stok</th>
+                    <th class="text-end">Min</th>
+                    <th class="text-end">Birim Fiyat</th>
+                    <th class="text-end">Değer</th>
+                    <th>Durum</th>
+                </tr>
+            </thead>
+            <tbody>
+            @if (Model.Rows.Count == 0)
+            {
+                <tr><td colspan="8" class="text-center text-muted py-4">Kayıt bulunamadı.</td></tr>
+            }
+            @foreach (var row in Model.Rows)
+            {
+                <tr class="@(row.IsLowStock ? "table-warning" : "")">
+                    <td class="fw-semibold">@row.Name</td>
+                    <td class="text-muted small">@(row.Code ?? "-")</td>
+                    <td>@row.CategoryLabel</td>
+                    <td class="text-end fw-bold">@row.Quantity</td>
+                    <td class="text-end text-muted">@row.MinQuantity</td>
+                    <td class="text-end">@row.Price.ToString("N2") ₺</td>
+                    <td class="text-end fw-semibold">@row.StockValue.ToString("N2") ₺</td>
+                    <td>
+                        @if (row.IsLowStock)
+                        {
+                            <span class="badge text-bg-warning">Düşük</span>
+                        }
+                        else
+                        {
+                            <span class="badge text-bg-success">Normal</span>
+                        }
+                    </td>
+                </tr>
+            }
+            </tbody>
+            @if (Model.Rows.Count > 0)
+            {
+                <tfoot class="table-light">
+                    <tr>
+                        <th colspan="6" class="text-end">Toplam envanter değeri</th>
+                        <th class="text-end">@Model.TotalStockValue.ToString("N2") ₺</th>
+                        <th></th>
+                    </tr>
+                </tfoot>
+            }
+        </table>
+    </div>
+</div>

@@ -1,0 +1,82 @@
+@model CustomerReportViewModel
+@{
+    ViewData["Title"] = "Müşteri Analizi";
+    ViewData["Subtitle"] = $"{Model.TotalCustomers} müşteri · Toplam ciro {Model.TotalRevenue:N2} ₺";
+}
+
+<partial name="_ReportHeader" />
+
+<form method="get" class="card-panel p-3 mb-3 no-print">
+    <div class="row g-2 align-items-end">
+        <div class="col-md-4">
+            <label class="form-label small fw-semibold">Başlangıç</label>
+            <input type="date" name="from" value="@Model.DateFrom?.ToString("yyyy-MM-dd")" class="form-control" />
+        </div>
+        <div class="col-md-4">
+            <label class="form-label small fw-semibold">Bitiş</label>
+            <input type="date" name="to" value="@Model.DateTo?.ToString("yyyy-MM-dd")" class="form-control" />
+        </div>
+        <div class="col-md-2">
+            <button type="submit" class="btn btn-primary w-100">Filtrele</button>
+        </div>
+    </div>
+</form>
+
+<div class="row g-3 mb-3 no-print">
+    <div class="col-md-4"><div class="stat-card"><div class="label">Müşteri</div><div class="value" style="font-size:1.4rem">@Model.TotalCustomers</div></div></div>
+    <div class="col-md-4"><div class="stat-card"><div class="label">Toplam Ciro</div><div class="value" style="font-size:1.4rem">@Model.TotalRevenue.ToString("N2") ₺</div></div></div>
+    <div class="col-md-4"><div class="stat-card"><div class="label">Toplam Alacak</div><div class="value" style="font-size:1.4rem;color:#e07d33">@Model.TotalOutstanding.ToString("N2") ₺</div></div></div>
+</div>
+
+<div class="card-panel overflow-hidden report-table">
+    <div class="table-responsive">
+        <table class="table table-hover mb-0 align-middle">
+            <thead class="table-light">
+                <tr>
+                    <th>#</th>
+                    <th>Müşteri</th>
+                    <th>Telefon</th>
+                    <th>Tip</th>
+                    <th class="text-end">Araç</th>
+                    <th class="text-end">İş Emri</th>
+                    <th class="text-end">Ciro</th>
+                    <th class="text-end">Tahsilat</th>
+                    <th class="text-end">Alacak</th>
+                </tr>
+            </thead>
+            <tbody>
+            @if (Model.Rows.Count == 0)
+            {
+                <tr><td colspan="9" class="text-center text-muted py-4">Kayıt bulunamadı.</td></tr>
+            }
+            @{ var i = 0; }
+            @foreach (var row in Model.Rows)
+            {
+                i++;
+                <tr>
+                    <td class="text-muted">@i</td>
+                    <td class="fw-semibold">@row.FullName</td>
+                    <td>@row.Phone</td>
+                    <td><span class="badge text-bg-light border">@row.CustomerType</span></td>
+                    <td class="text-end">@row.VehicleCount</td>
+                    <td class="text-end">@row.WorkOrderCount</td>
+                    <td class="text-end fw-semibold">@row.TotalRevenue.ToString("N2") ₺</td>
+                    <td class="text-end text-success">@row.PaidTotal.ToString("N2") ₺</td>
+                    <td class="text-end @(row.Outstanding > 0 ? "text-warning" : "")">@row.Outstanding.ToString("N2") ₺</td>
+                </tr>
+            }
+            </tbody>
+            @if (Model.Rows.Count > 0)
+            {
+                <tfoot class="table-light">
+                    <tr>
+                        <th colspan="6" class="text-end">Toplam</th>
+                        <th class="text-end">@Model.TotalRevenue.ToString("N2") ₺</th>
+                        <th class="text-end">@Model.TotalPaid.ToString("N2") ₺</th>
+                        <th class="text-end">@Model.TotalOutstanding.ToString("N2") ₺</th>
+                    </tr>
+                </tfoot>
+            }
+        </table>
+    </div>
+</div>

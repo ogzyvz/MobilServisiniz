@@ -1,0 +1,46 @@
+{
+  "expo": {
+    "name": "MobilServisiniz",
+    "slug": "mobilservisiniz",
+    "version": "1.0.6",
+    "orientation": "default",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "package": "com.otoservis.app",
+      "versionCode": 7,
+      "adaptiveIcon": {
+        "backgroundColor": "#2f4a86",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-sqlite",
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "Ruhsatı çekip araç bilgilerini otomatik doldurmak için kamera erişimi gereklidir.",
+          "photosPermission": "Ruhsat fotoğrafını seçmek için galeri erişimi gereklidir."
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
+      ],
+      "expo-sharing"
+    ]
+  }
+}

@@ -1,0 +1,109 @@
+@model CustomerFormViewModel
+@{
+    var isEdit = Model.Id.HasValue;
+    ViewData["Title"] = isEdit ? "Müşteri Düzenle" : "Yeni Müşteri";
+}
+
+<div class="mb-4">
+    <a asp-action="Index" class="text-decoration-none small text-muted">← Müşteri listesi</a>
+    <h1 class="page-title mt-1">@ViewData["Title"]</h1>
+</div>
+
+<div class="card-panel p-4" style="max-width:720px">
+    <form asp-action="@(isEdit ? "Edit" : "Create")" asp-route-id="@Model.Id" method="post">
+        @Html.AntiForgeryToken()
+        <div asp-validation-summary="ModelOnly" class="alert alert-danger py-2 small"></div>
+
+        <div class="row g-3">
+            <div class="col-md-6">
+                <label asp-for="CustomerType" class="form-label fw-semibold"></label>
+                <select asp-for="CustomerType" class="form-select" id="customerType">
+                    @foreach (var t in Model.CustomerTypes)
+                    {
+                        <option value="@t.Code">@t.Label</option>
+                    }
+                </select>
+            </div>
+            <div class="col-md-6" id="companyField" style="display:none">
+                <label asp-for="CompanyName" class="form-label fw-semibold"></label>
+                <input asp-for="CompanyName" class="form-control" />
+                <span asp-validation-for="CompanyName" class="text-danger small"></span>
+            </div>
+
+            <div class="col-12">
+                <label asp-for="FullName" class="form-label fw-semibold"></label>
+                <input asp-for="FullName" class="form-control" />
+                <span asp-validation-for="FullName" class="text-danger small"></span>
+            </div>
+
+            <div class="col-md-6">
+                <label asp-for="Phone" class="form-label fw-semibold"></label>
+                <input asp-for="Phone" class="form-control" placeholder="0555 123 45 67" />
+                <span asp-validation-for="Phone" class="text-danger small"></span>
+            </div>
+            <div class="col-md-6">
+                <label asp-for="Phone2" class="form-label fw-semibold"></label>
+                <input asp-for="Phone2" class="form-control" />
+            </div>
+
+            <div class="col-md-6">
+                <label asp-for="Email" class="form-label fw-semibold"></label>
+                <input asp-for="Email" class="form-control" type="email" />
+                <span asp-validation-for="Email" class="text-danger small"></span>
+            </div>
+            <div class="col-md-3">
+                <label asp-for="TcNo" class="form-label fw-semibold"></label>
+                <input asp-for="TcNo" class="form-control" maxlength="11" />
+            </div>
+            <div class="col-md-3">
+                <label asp-for="TaxNo" class="form-label fw-semibold"></label>
+                <input asp-for="TaxNo" class="form-control" />
+            </div>
+
+            <div class="col-12">
+                <label asp-for="Address" class="form-label fw-semibold"></label>
+                <textarea asp-for="Address" class="form-control" rows="2"></textarea>
+            </div>
+            <div class="col-md-6">
+                <label asp-for="City" class="form-label fw-semibold"></label>
+                <input asp-for="City" class="form-control" />
+            </div>
+            <div class="col-md-6">
+                <label asp-for="District" class="form-label fw-semibold"></label>
+                <input asp-for="District" class="form-control" />
+            </div>
+            <div class="col-12">
+                <label asp-for="Notes" class="form-label fw-semibold"></label>
+                <textarea asp-for="Notes" class="form-control" rows="3"></textarea>
+            </div>
+            <div class="col-12">
+                <div class="form-check">
+                    <input asp-for="IsSupplier" class="form-check-input" />
+                    <label asp-for="IsSupplier" class="form-check-label fw-semibold"></label>
+                </div>
+            </div>
+        </div>
+
+        <div class="d-flex gap-2 mt-4">
+            <button type="submit" class="btn btn-primary px-4" style="background:#2f4a86;border:0">
+                @(isEdit ? "Güncelle" : "Kaydet")
+            </button>
+            <a asp-action="Index" class="btn btn-outline-secondary">Vazgeç</a>
+        </div>
+    </form>
+</div>
+
+@section Scripts {
+    <partial name="_ValidationScriptsPartial" />
+    <script>
+        (function () {
+            const typeEl = document.getElementById('customerType');
+            const companyField = document.getElementById('companyField');
+            function toggleCompany() {
+                companyField.style.display = typeEl.value === 'kurumsal' ? '' : 'none';
+            }
+            typeEl.addEventListener('change', toggleCompany);
+            toggleCompany();
+        })();
+    </script>
+}

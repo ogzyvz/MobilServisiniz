@@ -1,0 +1,74 @@
+@model DashboardViewModel
+@{
+    ViewData["Title"] = "Dashboard";
+}
+
+<div class="mb-4">
+    <h1 class="page-title">@Model.ShopName</h1>
+    <p class="text-muted mb-0">Servis özeti ve hızlı metrikler</p>
+</div>
+
+@if (ViewData["Error"] is string err)
+{
+    <div class="alert alert-warning">@err</div>
+}
+
+<div class="row g-3 mb-4">
+    <div class="col-md-4 col-lg-2">
+        <div class="stat-card">
+            <div class="label">Bekleyen</div>
+            <div class="value">@Model.Waiting</div>
+        </div>
+    </div>
+    <div class="col-md-4 col-lg-2">
+        <div class="stat-card">
+            <div class="label">İşlemde</div>
+            <div class="value">@Model.InProgress</div>
+        </div>
+    </div>
+    <div class="col-md-4 col-lg-2">
+        <div class="stat-card">
+            <div class="label">Müşteri</div>
+            <div class="value">@Model.Customers</div>
+        </div>
+    </div>
+    <div class="col-md-4 col-lg-2">
+        <div class="stat-card">
+            <div class="label">Araç</div>
+            <div class="value">@Model.Vehicles</div>
+        </div>
+    </div>
+    <div class="col-md-4 col-lg-2">
+        <div class="stat-card">
+            <div class="label">Personel</div>
+            <div class="value">@Model.StaffCount</div>
+        </div>
+    </div>
+    <div class="col-md-4 col-lg-2">
+        <div class="stat-card">
+            <div class="label">Düşük Stok</div>
+            <div class="value text-danger">@Model.LowStock</div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3">
+    <div class="col-lg-6">
+        <div class="card-panel p-4">
+            <h2 class="h5 fw-bold mb-3">Raporlar</h2>
+            <p class="text-muted small">Detaylı raporlar ve gelir analizleri için raporlar bölümünü kullanın.</p>
+            <a asp-controller="Reports" asp-action="Index" class="btn btn-primary" style="background:#2f4a86;border:0">
+                Raporlara Git
+            </a>
+        </div>
+    </div>
+    <div class="col-lg-6">
+        <div class="card-panel p-4">
+            <h2 class="h5 fw-bold mb-3">Müşteriler</h2>
+            <p class="text-muted small">Müşteri ekleme, düzenleme ve arama.</p>
+            <a asp-controller="Customers" asp-action="Index" class="btn btn-outline-primary">
+                Müşteri Yönetimi
+            </a>
+        </div>
+    </div>
+</div>

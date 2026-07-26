@@ -1,0 +1,74 @@
+@model ReportsHubViewModel
+@{
+    ViewData["Title"] = "Raporlar";
+}
+
+<div class="mb-4">
+    <h1 class="page-title">Raporlar</h1>
+    <p class="text-muted">Bu ay @Model.MonthWorkOrders iş emri · @Model.MonthRevenue.ToString("N2") ₺ ciro</p>
+</div>
+
+<div class="row g-3 mb-4">
+    @foreach (var s in Model.StatusCounts)
+    {
+        <div class="col-6 col-md-3">
+            <div class="stat-card">
+                <div class="label">@s.Label</div>
+                <div class="value">@s.Count</div>
+            </div>
+        </div>
+    }
+</div>
+
+<div class="row g-3 mb-4">
+    <div class="col-6 col-md-3">
+        <div class="stat-card">
+            <div class="label">Bu ay servise alınan araç</div>
+            <div class="value">@Model.MonthVehiclesServiced</div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="stat-card">
+            <div class="label">Bu ay yapılan işlem</div>
+            <div class="value">@Model.MonthOperations</div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3">
+    <div class="col-md-6 col-xl-3">
+        <a asp-action="WorkOrders" class="report-link-card card-panel p-4 h-100">
+            <div class="report-icon mb-2">📋</div>
+            <h2 class="h5 fw-bold">1. İş Emri Raporu</h2>
+            <p class="text-muted small mb-0">Tüm iş emirleri, durum filtresi, tutar ve tahsilat</p>
+        </a>
+    </div>
+    <div class="col-md-6 col-xl-3">
+        <a asp-action="Revenue" class="report-link-card card-panel p-4 h-100">
+            <div class="report-icon mb-2">💰</div>
+            <h2 class="h5 fw-bold">2. Gelir Raporu</h2>
+            <p class="text-muted small mb-0">İşçilik, parça, indirim ve aylık ciro dökümü</p>
+        </a>
+    </div>
+    <div class="col-md-6 col-xl-3">
+        <a asp-action="Stock" class="report-link-card card-panel p-4 h-100">
+            <div class="report-icon mb-2">📦</div>
+            <h2 class="h5 fw-bold">3. Stok Raporu</h2>
+            <p class="text-muted small mb-0">Stok durumu, düşük stok uyarıları, envanter değeri</p>
+        </a>
+    </div>
+    <div class="col-md-6 col-xl-3">
+        <a asp-action="Customers" class="report-link-card card-panel p-4 h-100">
+            <div class="report-icon mb-2">👥</div>
+            <h2 class="h5 fw-bold">4. Müşteri Analizi</h2>
+            <p class="text-muted small mb-0">Müşteri bazlı ciro, araç ve iş emri sayıları</p>
+        </a>
+    </div>
+    <div class="col-md-6 col-xl-3">
+        <a asp-action="Suppliers" class="report-link-card card-panel p-4 h-100">
+            <div class="report-icon mb-2">🚚</div>
+            <h2 class="h5 fw-bold">5. Cari Raporu</h2>
+            <p class="text-muted small mb-0">Tedarikçi bazlı alış ve iade hareketleri</p>
+        </a>
+    </div>
+</div>

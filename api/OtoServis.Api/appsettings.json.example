@@ -1,0 +1,21 @@
+{
+  "ConnectionStrings": {
+    "Default": "Server=YOUR_SERVER;Database=OtoServis;User Id=YOUR_USER;Password=YOUR_PASSWORD;TrustServerCertificate=True;Encrypt=True;"
+  },
+  "Jwt": {
+    "Key": "CHANGE-ME-Min32Chars-Secret-Key!",
+    "Issuer": "OtoServis.Api",
+    "Audience": "OtoServis.Mobile",
+    "ExpireHours": 24
+  },
+  "Cors": {
+    "Origins": [ "http://localhost:8081", "http://localhost:19006", "*" ]
+  },
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft.AspNetCore": "Warning"
+    }
+  },
+  "AllowedHosts": "*"
+}

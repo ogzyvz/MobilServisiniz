@@ -1,0 +1,105 @@
+@model VehicleFormViewModel
+@{
+    var isEdit = Model.Id.HasValue;
+    ViewData["Title"] = isEdit ? "Araç Düzenle" : "Yeni Araç";
+}
+
+<div class="mb-4">
+    <a asp-action="Index" class="text-decoration-none small text-muted">← Araç listesi</a>
+    <h1 class="page-title mt-1">@ViewData["Title"]</h1>
+</div>
+
+@if (Model.ConflictVehicleId.HasValue)
+{
+    <div class="alert alert-warning d-flex justify-content-between align-items-center flex-wrap gap-2" style="max-width:720px">
+        <span>Bu plaka <strong>@Model.ConflictOwnerName</strong>'e kayıtlı. Devretmek ister misiniz?</span>
+        <form asp-action="TransferOnConflict" method="post" class="m-0">
+            @Html.AntiForgeryToken()
+            <input type="hidden" name="conflictVehicleId" value="@Model.ConflictVehicleId" />
+            <input type="hidden" name="newCustomerId" value="@Model.CustomerId" />
+            <button type="submit" class="btn btn-sm btn-warning">Bu Müşteriye Devret</button>
+        </form>
+    </div>
+}
+
+<div class="card-panel p-4" style="max-width:720px">
+    <form asp-action="@(isEdit ? "Edit" : "Create")" asp-route-id="@Model.Id" method="post">
+        @Html.AntiForgeryToken()
+        <div asp-validation-summary="ModelOnly" class="alert alert-danger py-2 small"></div>
+
+        <div class="row g-3">
+            <div class="col-md-6">
+                <label asp-for="Plate" class="form-label fw-semibold"></label>
+                <input asp-for="Plate" class="form-control" placeholder="34 ABC 123" style="text-transform:uppercase" />
+                <span asp-validation-for="Plate" class="text-danger small"></span>
+            </div>
+            <div class="col-md-6">
+                <label asp-for="CustomerId" class="form-label fw-semibold"></label>
+                <select asp-for="CustomerId" asp-items="Model.Customers" class="form-select">
+                    <option value="">-- Seçiniz --</option>
+                </select>
+                <span asp-validation-for="CustomerId" class="text-danger small"></span>
+            </div>
+
+            <div class="col-md-6">
+                <label asp-for="Brand" class="form-label fw-semibold"></label>
+                <input asp-for="Brand" class="form-control" />
+                <span asp-validation-for="Brand" class="text-danger small"></span>
+            </div>
+            <div class="col-md-6">
+                <label asp-for="Model" class="form-label fw-semibold"></label>
+                <input asp-for="Model" class="form-control" />
+                <span asp-validation-for="Model" class="text-danger small"></span>
+            </div>
+
+            <div class="col-md-4">
+                <label asp-for="Year" class="form-label fw-semibold"></label>
+                <input asp-for="Year" class="form-control" type="number" />
+                <span asp-validation-for="Year" class="text-danger small"></span>
+            </div>
+            <div class="col-md-4">
+                <label asp-for="Color" class="form-label fw-semibold"></label>
+                <input asp-for="Color" class="form-control" />
+            </div>
+            <div class="col-md-4">
+                <label asp-for="FuelType" class="form-label fw-semibold"></label>
+                <select asp-for="FuelType" class="form-select">
+                    <option value="">-- Seçiniz --</option>
+                    @foreach (var f in Model.FuelTypes)
+                    {
+                        <option value="@f.Code">@f.Label</option>
+                    }
+                </select>
+            </div>
+
+            <div class="col-md-4">
+                <label asp-for="Km" class="form-label fw-semibold"></label>
+                <input asp-for="Km" class="form-control" type="number" />
+                <span asp-validation-for="Km" class="text-danger small"></span>
+            </div>
+            <div class="col-md-4">
+                <label asp-for="ChassisNo" class="form-label fw-semibold"></label>
+                <input asp-for="ChassisNo" class="form-control" style="text-transform:uppercase" />
+            </div>
+            <div class="col-md-4">
+                <label asp-for="EngineNo" class="form-label fw-semibold"></label>
+                <input asp-for="EngineNo" class="form-control" />
+            </div>
+            <div class="col-md-4">
+                <label asp-for="EngineVolume" class="form-label fw-semibold"></label>
+                <input asp-for="EngineVolume" class="form-control" placeholder="1.6 / 1598 cm³" />
+            </div>
+        </div>
+
+        <div class="d-flex gap-2 mt-4">
+            <button type="submit" class="btn btn-primary px-4" style="background:#2f4a86;border:0">
+                @(isEdit ? "Güncelle" : "Kaydet")
+            </button>
+            <a asp-action="Index" class="btn btn-outline-secondary">Vazgeç</a>
+        </div>
+    </form>
+</div>
+
+@section Scripts {
+    <partial name="_ValidationScriptsPartial" />
+}

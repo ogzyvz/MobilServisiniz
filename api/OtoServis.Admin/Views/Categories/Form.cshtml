@@ -1,0 +1,62 @@
+@model CategoryFormViewModel
+@{
+    var isEdit = !string.IsNullOrEmpty(Model.OriginalCode);
+    var isStock = Model.Kind == "stock";
+    var kindLabel = isStock ? "Stok Kategorisi" : "Servis Kategorisi";
+    var actionName = isEdit
+        ? (isStock ? "EditStock" : "EditService")
+        : (isStock ? "CreateStock" : "CreateService");
+    ViewData["Title"] = isEdit ? $"{kindLabel} Düzenle" : $"Yeni {kindLabel}";
+}
+
+<div class="mb-4">
+    <a asp-action="Index" class="text-decoration-none small text-muted">← Kategori listesi</a>
+    <h1 class="page-title mt-1">@ViewData["Title"]</h1>
+</div>
+
+<div class="card-panel p-4" style="max-width:560px">
+    <form asp-action="@actionName" asp-route-code="@Model.OriginalCode" method="post">
+        @Html.AntiForgeryToken()
+        <div asp-validation-summary="ModelOnly" class="alert alert-danger py-2 small"></div>
+        <input type="hidden" asp-for="Kind" />
+
+        <div class="row g-3">
+            <div class="col-12">
+                <label asp-for="Code" class="form-label fw-semibold"></label>
+                @if (isEdit)
+                {
+                    <input asp-for="Code" class="form-control" readonly />
+                }
+                else
+                {
+                    <input asp-for="Code" class="form-control" placeholder="orn_kod" />
+                    <div class="form-text">Küçük harf, rakam ve alt çizgi kullanın (örn. yag, klima_gaz). Kayıttan sonra değiştirilemez.</div>
+                }
+                <span asp-validation-for="Code" class="text-danger small"></span>
+            </div>
+
+            <div class="col-12">
+                <label asp-for="Label" class="form-label fw-semibold"></label>
+                <input asp-for="Label" class="form-control" />
+                <span asp-validation-for="Label" class="text-danger small"></span>
+            </div>
+
+            <div class="col-md-4">
+                <label asp-for="SortOrder" class="form-label fw-semibold"></label>
+                <input asp-for="SortOrder" class="form-control" type="number" min="0" max="255" />
+                <span asp-validation-for="SortOrder" class="text-danger small"></span>
+            </div>
+        </div>
+
+        <div class="d-flex gap-2 mt-4">
+            <button type="submit" class="btn btn-primary px-4" style="background:#2f4a86;border:0">
+                @(isEdit ? "Güncelle" : "Kaydet")
+            </button>
+            <a asp-action="Index" class="btn btn-outline-secondary">Vazgeç</a>
+        </div>
+    </form>
+</div>
+
+@section Scripts {
+    <partial name="_ValidationScriptsPartial" />
+}

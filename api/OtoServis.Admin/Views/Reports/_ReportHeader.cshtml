@@ -1,0 +1,20 @@
+@{
+    var title = ViewData["Title"]?.ToString() ?? "Rapor";
+}
+<div class="d-flex justify-content-between align-items-center mb-4 report-toolbar no-print">
+    <div>
+        <h1 class="page-title">@title</h1>
+        @if (ViewData["Subtitle"] is string sub)
+        {
+            <p class="text-muted mb-0">@sub</p>
+        }
+    </div>
+    <div class="d-flex gap-2">
+        <button type="button" class="btn btn-outline-secondary btn-sm" onclick="window.print()">🖨 Yazdır</button>
+        <a asp-action="Index" class="btn btn-outline-secondary btn-sm">← Raporlar</a>
+    </div>
+</div>
+<div class="print-only mb-3" style="display:none">
+    <h1 class="h4 fw-bold">MobilServisiniz — @title</h1>
+    <p class="text-muted small mb-0">@User.FindFirst("shop_name")?.Value · @DateTime.Now.ToString("dd.MM.yyyy HH:mm")</p>
+</div>

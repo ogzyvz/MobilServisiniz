@@ -1,0 +1,44 @@
+@model SelectShopViewModel
+@{
+    ViewData["Title"] = "Servis Seç";
+    Layout = null;
+}
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Servis Seç - MobilServisiniz</title>
+    <link rel="stylesheet" href="~/lib/bootstrap/dist/css/bootstrap.min.css" />
+    <link rel="stylesheet" href="~/css/admin.css" asp-append-version="true" />
+</head>
+<body>
+<div class="login-wrap">
+    <div class="login-card">
+        <h1 class="h4 fw-bold mb-1" style="color:#2f4a86">Servis Seçin</h1>
+        <p class="text-muted small mb-4">Birden fazla servise bağlısınız.</p>
+
+        <form asp-action="SelectShop" method="post">
+            @Html.AntiForgeryToken()
+            <div asp-validation-summary="ModelOnly" class="alert alert-danger py-2 small"></div>
+
+            @foreach (var shop in Model.Shops)
+            {
+                <div class="form-check border rounded-3 p-3 mb-2">
+                    <input class="form-check-input" type="radio" name="SelectedShopId" id="shop_@shop.ShopId"
+                           value="@shop.ShopId" @(shop.IsDefault ? "checked" : "") />
+                    <label class="form-check-label w-100" for="shop_@shop.ShopId">
+                        <div class="fw-bold">@shop.ShopName</div>
+                        <div class="small text-muted">@shop.City · @shop.Role</div>
+                    </label>
+                </div>
+            }
+
+            <button type="submit" class="btn btn-lg w-100 text-white fw-bold mt-2" style="background:#2f4a86">
+                Devam Et
+            </button>
+        </form>
+    </div>
+</div>
+</body>
+</html>

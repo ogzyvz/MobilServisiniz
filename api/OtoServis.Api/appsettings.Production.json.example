@@ -1,0 +1,25 @@
+{
+  "ConnectionStrings": {
+    "Default": "Server=YOUR_SERVER;Database=OtoServis;User Id=YOUR_USER;Password=YOUR_PASSWORD;TrustServerCertificate=True;Encrypt=True;"
+  },
+  "Jwt": {
+    "Key": "CHANGE-ME-Min32Chars-Secret-Key!",
+    "Issuer": "OtoServis.Api",
+    "Audience": "OtoServis.Mobile",
+    "ExpireHours": 24
+  },
+  "Kestrel": {
+    "Endpoints": {
+      "Http": {
+        "Url": "http://0.0.0.0:5280"
+      }
+    }
+  },
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft.AspNetCore": "Warning"
+    }
+  },
+  "AllowedHosts": "*"
+}

@@ -1,0 +1,70 @@
+@model SuppliersIndexViewModel
+@{
+    ViewData["Title"] = "Cariler";
+}
+
+@if (TempData["Success"] is string ok)
+{
+    <div class="alert alert-success py-2">@ok</div>
+}
+@if (TempData["Error"] is string err)
+{
+    <div class="alert alert-danger py-2">@err</div>
+}
+
+<div class="d-flex justify-content-between align-items-start mb-4 flex-wrap gap-3">
+    <div>
+        <h1 class="page-title">Cariler</h1>
+        <p class="text-muted mb-0">@Model.Items.Count kayıt</p>
+    </div>
+    <a asp-action="Create" class="btn btn-primary btn-sm px-3" style="background:#2f4a86;border:0">
+        + Yeni Cari
+    </a>
+</div>
+
+<form method="get" class="card-panel p-3 mb-3">
+    <div class="row g-2 align-items-end">
+        <div class="col-md-8">
+            <label class="form-label small fw-semibold">Ara</label>
+            <input type="text" name="search" value="@Model.Search" class="form-control" placeholder="İsim veya telefon" />
+        </div>
+        <div class="col-md-4">
+            <button type="submit" class="btn btn-primary w-100" style="background:#2f4a86;border:0">Ara</button>
+        </div>
+    </div>
+</form>
+
+<div class="card-panel overflow-hidden">
+    <div class="table-responsive">
+        <table class="table table-hover mb-0 align-middle">
+            <thead class="table-light">
+                <tr>
+                    <th>Cari Adı</th>
+                    <th>İlgili Kişi</th>
+                    <th>Telefon</th>
+                    <th class="text-end">Bakiye</th>
+                    <th class="text-end" style="width:180px">İşlem</th>
+                </tr>
+            </thead>
+            <tbody>
+            @if (Model.Items.Count == 0)
+            {
+                <tr><td colspan="5" class="text-center text-muted py-4">Kayıt bulunamadı.</td></tr>
+            }
+            @foreach (var s in Model.Items)
+            {
+                <tr>
+                    <td class="fw-semibold">@s.Name</td>
+                    <td>@(s.Contact ?? "-")</td>
+                    <td>@(s.Phone ?? "-")</td>
+                    <td class="text-end @(s.Balance > 0 ? "text-warning" : "")">@s.Balance.ToString("N2") ₺</td>
+                    <td class="text-end">
+                        <a asp-action="Ledger" asp-route-id="@s.Id" class="btn btn-sm btn-outline-secondary">Cari Hesap</a>
+                        <a asp-action="Edit" asp-route-id="@s.Id" class="btn btn-sm btn-outline-primary">Düzenle</a>
+                    </td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    </div>
+</div>

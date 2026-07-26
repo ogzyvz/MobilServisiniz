@@ -1,0 +1,94 @@
+@model RevenueReportViewModel
+@{
+    ViewData["Title"] = "Gelir Raporu";
+    ViewData["Subtitle"] = $"{Model.WorkOrderCount} iş emri · Genel toplam {Model.GrandTotal:N2} ₺";
+}
+
+<partial name="_ReportHeader" />
+
+<form method="get" class="card-panel p-3 mb-3 no-print">
+    <div class="row g-2 align-items-end">
+        <div class="col-md-4">
+            <label class="form-label small fw-semibold">Başlangıç</label>
+            <input type="date" name="from" value="@Model.DateFrom?.ToString("yyyy-MM-dd")" class="form-control" />
+        </div>
+        <div class="col-md-4">
+            <label class="form-label small fw-semibold">Bitiş</label>
+            <input type="date" name="to" value="@Model.DateTo?.ToString("yyyy-MM-dd")" class="form-control" />
+        </div>
+        <div class="col-md-2">
+            <button type="submit" class="btn btn-primary w-100">Filtrele</button>
+        </div>
+    </div>
+</form>
+
+<div class="row g-3 mb-4">
+    <div class="col-md-4 col-lg-2">
+        <div class="stat-card"><div class="label">İşçilik</div><div class="value" style="font-size:1.3rem">@Model.LaborTotal.ToString("N2") ₺</div></div>
+    </div>
+    <div class="col-md-4 col-lg-2">
+        <div class="stat-card"><div class="label">Parça</div><div class="value" style="font-size:1.3rem">@Model.PartsTotal.ToString("N2") ₺</div></div>
+    </div>
+    <div class="col-md-4 col-lg-2">
+        <div class="stat-card"><div class="label">İndirim</div><div class="value text-danger" style="font-size:1.3rem">-@Model.DiscountTotal.ToString("N2") ₺</div></div>
+    </div>
+    <div class="col-md-4 col-lg-2">
+        <div class="stat-card"><div class="label">Genel Toplam</div><div class="value" style="font-size:1.3rem">@Model.GrandTotal.ToString("N2") ₺</div></div>
+    </div>
+    <div class="col-md-4 col-lg-2">
+        <div class="stat-card"><div class="label">Tahsilat</div><div class="value text-success" style="font-size:1.3rem">@Model.PaidTotal.ToString("N2") ₺</div></div>
+    </div>
+    <div class="col-md-4 col-lg-2">
+        <div class="stat-card"><div class="label">Alacak</div><div class="value" style="font-size:1.3rem;color:#e07d33">@Model.Outstanding.ToString("N2") ₺</div></div>
+    </div>
+</div>
+
+<h2 class="h6 fw-bold mb-3">Aylık Ciro @((Model.DateFrom.HasValue || Model.DateTo.HasValue) ? "(Seçilen Aralık)" : "(Son 12 Ay)")</h2>
+<div class="card-panel overflow-hidden report-table">
+    <div class="table-responsive">
+        <table class="table table-hover mb-0 align-middle">
+            <thead class="table-light">
+                <tr>
+                    <th>Ay</th>
+                    <th class="text-end">İş Emri</th>
+                    <th class="text-end">Ciro</th>
+                    <th class="text-end">Tahsilat</th>
+                    <th class="text-end">Kalan</th>
+                </tr>
+            </thead>
+            <tbody>
+            @if (Model.MonthlyRows.Count == 0)
+            {
+                <tr><td colspan="5" class="text-center text-muted py-4">Veri yok.</td></tr>
+            }
+            @foreach (var m in Model.MonthlyRows)
+            {
+                <tr>
+                    <td class="fw-semibold">@m.MonthLabel</td>
+                    <td class="text-end">@m.WorkOrderCount</td>
+                    <td class="text-end fw-semibold">@m.Revenue.ToString("N2") ₺</td>
+                    <td class="text-end text-success">@m.Paid.ToString("N2") ₺</td>
+                    <td class="text-end @(m.Outstanding > 0 ? "text-warning" : "")">@m.Outstanding.ToString("N2") ₺</td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div class="row g-3 mt-3 no-print">
+    <div class="col-md-6">
+        <div class="card-panel p-3">
+            <div class="small text-muted">İşçilik payı</div>
+            <div class="progress mt-2" style="height:8px">
+                @{
+                    var laborPct = Model.GrandTotal > 0 ? (double)(Model.LaborTotal / Model.GrandTotal * 100) : 0;
+                    var partsPct = Model.GrandTotal > 0 ? (double)(Model.PartsTotal / Model.GrandTotal * 100) : 0;
+                }
+                <div class="progress-bar" style="width:@(laborPct.ToString("F0"))%;background:#2f4a86"></div>
+                <div class="progress-bar" style="width:@(partsPct.ToString("F0"))%;background:#e07d33"></div>
+            </div>
+            <div class="small mt-2"><span style="color:#2f4a86">■</span> İşçilik @laborPct.ToString("F0")% · <span style="color:#e07d33">■</span> Parça @partsPct.ToString("F0")%</div>
+        </div>
+    </div>
+</div>

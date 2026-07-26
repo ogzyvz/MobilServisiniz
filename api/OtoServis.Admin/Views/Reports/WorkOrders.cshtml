@@ -1,0 +1,97 @@
+@model WorkOrdersReportViewModel
+@{
+    ViewData["Title"] = "İş Emri Raporu";
+    ViewData["Subtitle"] = $"{Model.Count} kayıt · Toplam {Model.TotalRevenue:N2} ₺ · Tahsil {Model.TotalPaid:N2} ₺";
+    string StatusBadge(string status) => $"badge-status badge-{status.Replace(' ', '_')}";
+}
+
+<partial name="_ReportHeader" />
+
+<form method="get" class="card-panel p-3 mb-3 no-print">
+    <div class="row g-2 align-items-end">
+        <div class="col-md-4">
+            <label class="form-label small fw-semibold">Durum filtresi</label>
+            <select name="status" class="form-select" onchange="this.form.submit()">
+                <option value="">Tümü</option>
+                @foreach (var s in Model.StatusOptions)
+                {
+                    if (Model.StatusFilter == s.Status)
+                    {
+                        <option value="@s.Status" selected="selected">@s.Label (@s.Count)</option>
+                    }
+                    else
+                    {
+                        <option value="@s.Status">@s.Label (@s.Count)</option>
+                    }
+                }
+            </select>
+        </div>
+        <div class="col-md-3">
+            <label class="form-label small fw-semibold">Başlangıç</label>
+            <input type="date" name="from" value="@Model.DateFrom?.ToString("yyyy-MM-dd")" class="form-control" />
+        </div>
+        <div class="col-md-3">
+            <label class="form-label small fw-semibold">Bitiş</label>
+            <input type="date" name="to" value="@Model.DateTo?.ToString("yyyy-MM-dd")" class="form-control" />
+        </div>
+        <div class="col-md-2">
+            <button type="submit" class="btn btn-primary w-100">Filtrele</button>
+        </div>
+    </div>
+</form>
+
+<div class="row g-3 mb-3 no-print">
+    <div class="col-md-4"><div class="stat-card"><div class="label">Kayıt</div><div class="value" style="font-size:1.4rem">@Model.Count</div></div></div>
+    <div class="col-md-4"><div class="stat-card"><div class="label">Toplam Tutar</div><div class="value" style="font-size:1.4rem">@Model.TotalRevenue.ToString("N2") ₺</div></div></div>
+    <div class="col-md-4"><div class="stat-card"><div class="label">Kalan Alacak</div><div class="value" style="font-size:1.4rem;color:#e07d33">@Model.TotalOutstanding.ToString("N2") ₺</div></div></div>
+</div>
+
+<div class="card-panel overflow-hidden report-table">
+    <div class="table-responsive">
+        <table class="table table-hover mb-0 align-middle">
+            <thead class="table-light">
+                <tr>
+                    <th>No</th>
+                    <th>Plaka</th>
+                    <th>Müşteri</th>
+                    <th>Durum</th>
+                    <th>Tarih</th>
+                    <th class="text-end">Tutar</th>
+                    <th class="text-end">Ödenen</th>
+                    <th class="text-end">Kalan</th>
+                </tr>
+            </thead>
+            <tbody>
+            @if (Model.Rows.Count == 0)
+            {
+                <tr><td colspan="8" class="text-center text-muted py-4">Kayıt bulunamadı.</td></tr>
+            }
+            @foreach (var row in Model.Rows)
+            {
+                var outstanding = row.GrandTotal - row.PaidTotal;
+                <tr>
+                    <td class="fw-semibold">#@row.OrderNo</td>
+                    <td>@row.Plate</td>
+                    <td>@row.CustomerName</td>
+                    <td><span class="@StatusBadge(row.Status)">@row.Status</span></td>
+                    <td class="text-muted small">@row.OpenedAt.ToLocalTime().ToString("dd.MM.yyyy")</td>
+                    <td class="text-end fw-semibold">@row.GrandTotal.ToString("N2") ₺</td>
+                    <td class="text-end text-success">@row.PaidTotal.ToString("N2") ₺</td>
+                    <td class="text-end @(outstanding > 0 ? "text-warning" : "")">@outstanding.ToString("N2") ₺</td>
+                </tr>
+            }
+            </tbody>
+            @if (Model.Rows.Count > 0)
+            {
+                <tfoot class="table-light">
+                    <tr>
+                        <th colspan="5" class="text-end">Toplam</th>
+                        <th class="text-end">@Model.TotalRevenue.ToString("N2") ₺</th>
+                        <th class="text-end">@Model.TotalPaid.ToString("N2") ₺</th>
+                        <th class="text-end">@Model.TotalOutstanding.ToString("N2") ₺</th>
+                    </tr>
+                </tfoot>
+            }
+        </table>
+    </div>
+</div>

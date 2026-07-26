@@ -1,0 +1,56 @@
+﻿@{
+    var controller = ViewContext.RouteData.Values["controller"]?.ToString() ?? "";
+    var shopName = User.Identity?.IsAuthenticated == true ? User.FindFirst("shop_name")?.Value : null;
+}
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>@ViewData["Title"] - MobilServisiniz Yönetim</title>
+    <link rel="stylesheet" href="~/lib/bootstrap/dist/css/bootstrap.min.css" />
+    <link rel="stylesheet" href="~/css/admin.css" asp-append-version="true" />
+</head>
+<body>
+<div class="admin-shell">
+    @if (User.Identity?.IsAuthenticated == true && !string.IsNullOrEmpty(shopName))
+    {
+        <aside class="admin-sidebar">
+            <div class="brand">MobilServisiniz Panel</div>
+            <div class="shop-name">@shopName</div>
+            <nav class="admin-nav py-2">
+                <a class="@(controller == "Dashboard" ? "active" : "")" asp-controller="Dashboard" asp-action="Index">📊 Dashboard</a>
+                <a class="@(controller == "Reports" ? "active" : "")" asp-controller="Reports" asp-action="Index">📈 Raporlar</a>
+                <a class="@(controller == "Customers" ? "active" : "")" asp-controller="Customers" asp-action="Index">👥 Müşteriler</a>
+                <a class="@(controller == "Vehicles" ? "active" : "")" asp-controller="Vehicles" asp-action="Index">🚗 Araçlar</a>
+                <a class="@(controller == "Suppliers" ? "active" : "")" asp-controller="Suppliers" asp-action="Index">🚚 Cariler</a>
+                <a class="@(controller == "Categories" ? "active" : "")" asp-controller="Categories" asp-action="Index">🏷️ Kategoriler</a>
+            </nav>
+        </aside>
+    }
+
+    <div class="admin-main">
+        @if (User.Identity?.IsAuthenticated == true)
+        {
+            <header class="admin-topbar">
+                <div class="fw-bold text-secondary">@ViewData["Title"]</div>
+                <div class="d-flex align-items-center gap-3">
+                    <span class="text-muted small">@User.Identity?.Name</span>
+                    <form asp-controller="Account" asp-action="Logout" method="post" class="m-0">
+                        @Html.AntiForgeryToken()
+                        <button type="submit" class="btn btn-sm btn-outline-secondary">Çıkış</button>
+                    </form>
+                </div>
+            </header>
+        }
+
+        <main class="admin-content">
+            @RenderBody()
+        </main>
+    </div>
+</div>
+<script src="~/lib/jquery/dist/jquery.min.js"></script>
+<script src="~/lib/bootstrap/dist/js/bootstrap.bundle.min.js"></script>
+@await RenderSectionAsync("Scripts", required: false)
+</body>
+</html>
