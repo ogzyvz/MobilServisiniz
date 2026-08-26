@@ -56,11 +56,21 @@ workflows:
             build
       - name: Package as unsigned .ipa (Payload/App.app)
         script: |
-          cd ios/build/Build/Products/Release-iphoneos
+          cd ios
+          echo ">> build/ altindaki .app dosyalari araniyor..."
+          APP_PATH=$(find build/Build/Products -maxdepth 3 -name "*.app" 2>/dev/null | head -n 1)
+          if [ -z "$APP_PATH" ]; then
+            echo "HATA: .app bulunamadi. build/ klasor yapisi:"
+            find build -maxdepth 6 2>/dev/null || echo "build/ klasoru de yok!"
+            exit 1
+          fi
+          echo ">> Bulunan .app: $APP_PATH"
           rm -rf Payload
           mkdir -p Payload
-          cp -r MobilServisiniz.app Payload/
+          cp -r "$APP_PATH" Payload/
           zip -r -y "$CM_BUILD_DIR/mobile/MobilServisiniz-unsigned.ipa" Payload
+          echo ">> IPA olusturuldu: $CM_BUILD_DIR/mobile/MobilServisiniz-unsigned.ipa"
+          ls -la "$CM_BUILD_DIR/mobile/"*.ipa
     artifacts:
       - mobile/MobilServisiniz-unsigned.ipa
 
