@@ -42,6 +42,7 @@ public static class ClaimTypes_
 {
     public const string ShopId = "shop_id";
     public const string Role = "shop_role";
+    public const string SessionId = "sid";
 }
 
 public static class ClaimsPrincipalExtensions
@@ -57,4 +58,10 @@ public static class ClaimsPrincipalExtensions
 
     public static string? GetShopRole(this ClaimsPrincipal user) =>
         user.FindFirstValue(ClaimTypes_.Role);
+
+    public static Guid? GetSessionId(this ClaimsPrincipal user)
+    {
+        var v = user.FindFirstValue(ClaimTypes_.SessionId);
+        return v is null ? null : Guid.Parse(v);
+    }
 }

@@ -2,7 +2,7 @@ import { Pressable, Text, View } from 'react-native'
 import { ChevronRight, User } from 'lucide-react-native'
 import type { Customer, Vehicle } from '@/lib/types'
 import { StatusBadge } from '@/components/status-badge'
-import { formatTime } from '@/lib/format'
+import { formatDateTime } from '@/lib/format'
 import { colors } from '@/lib/theme'
 
 export type VehicleCardData = Pick<Vehicle, 'plate' | 'brand' | 'model' | 'status' | 'createdAt'> & {
@@ -41,7 +41,7 @@ export function VehicleCard({
           </Text>
           <Text className="text-sm text-muted-foreground">·</Text>
           <Text className="text-sm text-muted-foreground">
-            {formatTime(vehicle.createdAt)}
+            {formatDateTime(vehicle.createdAt)}
           </Text>
         </View>
       </View>

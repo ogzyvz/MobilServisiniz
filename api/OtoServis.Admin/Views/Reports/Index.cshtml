@@ -1,6 +1,9 @@
 @model ReportsHubViewModel
 @{
     ViewData["Title"] = "Raporlar";
+    var plan = Context.Items["PlanEntitlements"] as OtoServis.Admin.Services.AdminPlanEntitlements;
+    var canStock = plan?.Features.Stock ?? true;
+    var canSuppliers = plan?.Features.Suppliers ?? true;
 }
 
 <div class="mb-4">
@@ -50,13 +53,16 @@
             <p class="text-muted small mb-0">İşçilik, parça, indirim ve aylık ciro dökümü</p>
         </a>
     </div>
-    <div class="col-md-6 col-xl-3">
-        <a asp-action="Stock" class="report-link-card card-panel p-4 h-100">
-            <div class="report-icon mb-2">📦</div>
-            <h2 class="h5 fw-bold">3. Stok Raporu</h2>
-            <p class="text-muted small mb-0">Stok durumu, düşük stok uyarıları, envanter değeri</p>
-        </a>
-    </div>
+    @if (canStock)
+    {
+        <div class="col-md-6 col-xl-3">
+            <a asp-action="Stock" class="report-link-card card-panel p-4 h-100">
+                <div class="report-icon mb-2">📦</div>
+                <h2 class="h5 fw-bold">3. Stok Raporu</h2>
+                <p class="text-muted small mb-0">Stok durumu, düşük stok uyarıları, envanter değeri</p>
+            </a>
+        </div>
+    }
     <div class="col-md-6 col-xl-3">
         <a asp-action="Customers" class="report-link-card card-panel p-4 h-100">
             <div class="report-icon mb-2">👥</div>
@@ -64,11 +70,14 @@
             <p class="text-muted small mb-0">Müşteri bazlı ciro, araç ve iş emri sayıları</p>
         </a>
     </div>
-    <div class="col-md-6 col-xl-3">
-        <a asp-action="Suppliers" class="report-link-card card-panel p-4 h-100">
-            <div class="report-icon mb-2">🚚</div>
-            <h2 class="h5 fw-bold">5. Cari Raporu</h2>
-            <p class="text-muted small mb-0">Tedarikçi bazlı alış ve iade hareketleri</p>
-        </a>
-    </div>
+    @if (canSuppliers)
+    {
+        <div class="col-md-6 col-xl-3">
+            <a asp-action="Suppliers" class="report-link-card card-panel p-4 h-100">
+                <div class="report-icon mb-2">🚚</div>
+                <h2 class="h5 fw-bold">5. Cari Raporu</h2>
+                <p class="text-muted small mb-0">Tedarikçi bazlı alış ve iade hareketleri</p>
+            </a>
+        </div>
+    }
 </div>

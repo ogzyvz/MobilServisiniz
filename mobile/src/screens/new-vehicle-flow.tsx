@@ -9,7 +9,6 @@ import {
   TextInput,
   View,
 } from 'react-native'
-import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import * as ImagePicker from 'expo-image-picker'
 import {
   ArrowLeft,
@@ -24,11 +23,18 @@ import {
   Search,
   Keyboard,
   MessageSquareWarning,
+  X,
 } from 'lucide-react-native'
 import { cn } from '@/lib/utils'
-import type { Customer, Vehicle } from '@/lib/types'
+import type { ComplaintCategory, Customer, Vehicle } from '@/lib/types'
+import {
+  COMPLAINT_CATEGORY_LABELS,
+  COMPLAINT_CATEGORY_ORDER,
+} from '@/lib/types'
 import { scanRuhsat } from '@/lib/ai-scan'
-import { TextField, TextArea } from '@/components/form-field'
+import { getCachedEntitlements } from '@/lib/api'
+import { TextField, TextArea, SelectField } from '@/components/form-field'
+import { KeyboardAwareScrollView } from '@/components/keyboard-aware-scroll'
 import { colors, withAlpha } from '@/lib/theme'
 import { PlateConflictError } from '@/lib/api'
 
@@ -42,19 +48,24 @@ function uid() {
 
 export function NewVehicleFlow({
   customers,
-  onCancel,
+  onCancel: _onCancel,
   onComplete,
   onTransferConflict,
 }: {
   customers: Customer[]
   onCancel: () => void
-  onComplete: (vehicle: Vehicle) => Promise<void>
-  onTransferConflict: (vehicleId: string, newCustomerId: string, complaint: string) => void
+  onComplete: (vehicle: Vehicle, opts?: { ruhsatUri?: string }) => Promise<void>
+  onTransferConflict: (
+    vehicleId: string,
+    newCustomerId: string,
+    complaint: string,
+    complaintCategory?: ComplaintCategory,
+  ) => void
 }) {
-  const insets = useSafeAreaInsets()
   const [step, setStep] = useState<Step>(0)
   const [scanning, setScanning] = useState(false)
   const [scanned, setScanned] = useState(false)
+  const [ruhsatUri, setRuhsatUri] = useState<string | undefined>()
 
   const [plate, setPlate] = useState('')
   const [brand, setBrand] = useState('')
@@ -76,6 +87,7 @@ export function NewVehicleFlow({
   const [address, setAddress] = useState('')
 
   const [complaint, setComplaint] = useState('')
+  const [complaintCategory, setComplaintCategory] = useState<ComplaintCategory>('diger')
 
   async function pickImage(source: 'camera' | 'gallery') {
     if (source === 'camera') {
@@ -142,7 +154,12 @@ export function NewVehicleFlow({
         return
       }
 
+      if (getCachedEntitlements()?.features.aiRuhsat === false) {
+        Alert.alert('Paket özelliği', 'AI ruhsat okuma bu pakette yok.')
+        return
+      }
       setScanning(true)
+      setRuhsatUri(asset.uri)
       const data = await scanRuhsat(asset.base64, asset.mimeType ?? 'image/jpeg')
       setPlate(data.plate)
       setBrand(data.brand)
@@ -216,14 +233,21 @@ export function NewVehicleFlow({
       createdAt: now,
       customer,
       complaints: complaint.trim()
-        ? [{ id: uid(), text: complaint.trim(), createdAt: now }]
+        ? [
+            {
+              id: uid(),
+              text: complaint.trim(),
+              createdAt: now,
+              category: complaintCategory,
+            },
+          ]
         : [],
       services: [],
       products: [],
     }
 
     try {
-      await onComplete(vehicle)
+      await onComplete(vehicle, ruhsatUri ? { ruhsatUri } : undefined)
     } catch (e) {
       if (e instanceof PlateConflictError && e.resolvedCustomerId) {
         const newCustomerId = e.resolvedCustomerId
@@ -235,7 +259,13 @@ export function NewVehicleFlow({
             {
               text: 'Devret',
               style: 'destructive',
-              onPress: () => onTransferConflict(e.conflict.vehicleId, newCustomerId, complaint.trim()),
+              onPress: () =>
+                onTransferConflict(
+                  e.conflict.vehicleId,
+                  newCustomerId,
+                  complaint.trim(),
+                  complaintCategory,
+                ),
             },
           ],
         )
@@ -280,16 +310,15 @@ export function NewVehicleFlow({
 
   return (
     <View className="flex-1">
-      <View
-        className="flex-row items-center gap-3 bg-background px-4 pb-4"
-        style={{ paddingTop: insets.top + 12 }}
-      >
-        <Pressable
-          onPress={() => (step === 0 ? onCancel() : setStep((step - 1) as Step))}
-          className="h-11 w-11 items-center justify-center rounded-xl bg-secondary"
-        >
-          <ArrowLeft size={20} color={colors.secondaryForeground} />
-        </Pressable>
+      <View className="flex-row items-center gap-3 bg-background px-4 pb-3 pt-3">
+        {step > 0 ? (
+          <Pressable
+            onPress={() => setStep((step - 1) as Step)}
+            className="h-11 w-11 items-center justify-center rounded-xl bg-secondary"
+          >
+            <ArrowLeft size={20} color={colors.secondaryForeground} />
+          </Pressable>
+        ) : null}
         <View className="flex-1">
           <Text className="text-xs font-semibold text-muted-foreground">
             Adım {step + 1} / 4
@@ -309,10 +338,10 @@ export function NewVehicleFlow({
         ))}
       </View>
 
-      <ScrollView
+      <KeyboardAwareScrollView
         className="flex-1"
-        contentContainerStyle={{ paddingHorizontal: 20, paddingVertical: 24 }}
-        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 24 }}
+        basePaddingBottom={48}
         showsVerticalScrollIndicator={false}
       >
         {step === 0 && (
@@ -383,10 +412,19 @@ export function NewVehicleFlow({
           <View className="flex flex-col gap-4">
             <IntroLine
               icon={MessageSquareWarning}
-              text="Müşterinin belirttiği şikayet / arıza"
+              text="Müşterinin belirttiği şikayet / istek"
+            />
+            <SelectField
+              label="Kategori"
+              value={complaintCategory}
+              onChange={(v) => setComplaintCategory(v as ComplaintCategory)}
+              options={COMPLAINT_CATEGORY_ORDER.map((value) => ({
+                value,
+                label: COMPLAINT_CATEGORY_LABELS[value],
+              }))}
             />
             <TextArea
-              label="Şikayet"
+              label="Şikayet / İstek"
               value={complaint}
               onChange={setComplaint}
               rows={5}
@@ -400,7 +438,7 @@ export function NewVehicleFlow({
             </StepButton>
           </View>
         )}
-      </ScrollView>
+      </KeyboardAwareScrollView>
     </View>
   )
 }
@@ -567,12 +605,17 @@ function CustomerStep({
 }) {
   const [query, setQuery] = useState('')
   const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase()
+    const q = query.trim().toLocaleLowerCase('tr')
     if (!q) return customers
-    return customers.filter(
-      (c) => c.name.toLowerCase().includes(q) || c.phone.toLowerCase().includes(q),
-    )
+    return customers.filter((c) => {
+      const name = c.name.toLocaleLowerCase('tr')
+      const phone = c.phone.replace(/\s+/g, '')
+      const qPhone = q.replace(/\s+/g, '')
+      return name.includes(q) || phone.includes(qPhone)
+    })
   }, [customers, query])
+
+  const selectedCustomer = customers.find((c) => c.id === selectedCustomerId) ?? null
 
   return (
     <View className="flex flex-col gap-4">
@@ -603,55 +646,100 @@ function CustomerStep({
               placeholder="İsim veya telefon ara"
               placeholderTextColor={withAlpha(colors.mutedForeground, 0.6)}
               className="h-14 flex-1 text-base font-medium text-foreground"
+              autoCorrect={false}
+              autoCapitalize="none"
             />
+            {query.length > 0 ? (
+              <Pressable onPress={() => setQuery('')} hitSlop={8}>
+                <X size={18} color={colors.mutedForeground} />
+              </Pressable>
+            ) : null}
           </View>
 
-          <View className="flex flex-col gap-2">
-            {filtered.length === 0 && (
-              <View className="rounded-xl bg-secondary px-4 py-6">
-                <Text className="text-center text-sm font-medium text-muted-foreground">
-                  Müşteri bulunamadı. "Yeni Müşteri" ile ekleyebilirsin.
+          {selectedCustomer ? (
+            <View className="flex-row items-center gap-3 rounded-2xl border-2 border-primary bg-primary/5 p-3">
+              <View className="h-11 w-11 items-center justify-center rounded-xl bg-primary">
+                <Text className="text-base font-extrabold text-primary-foreground">
+                  {selectedCustomer.name.charAt(0).toUpperCase()}
                 </Text>
               </View>
-            )}
-            {filtered.map((c) => {
-              const active = c.id === selectedCustomerId
-              return (
-                <Pressable
-                  key={c.id}
-                  onPress={() => onSelectCustomer(c.id)}
-                  className={cn(
-                    'flex-row items-center gap-3 rounded-2xl border-2 bg-card p-3',
-                    active ? 'border-primary bg-primary/5' : 'border-border',
-                  )}
-                >
-                  <View
-                    className={cn(
-                      'h-11 w-11 items-center justify-center rounded-xl',
-                      active ? 'bg-primary' : 'bg-secondary',
-                    )}
-                  >
-                    <Text
+              <View className="min-w-0 flex-1">
+                <Text className="text-xs font-bold uppercase tracking-wide text-primary">
+                  Seçili müşteri
+                </Text>
+                <Text className="font-bold text-foreground" numberOfLines={1}>
+                  {selectedCustomer.name}
+                </Text>
+                <Text className="text-sm text-muted-foreground" numberOfLines={1}>
+                  {selectedCustomer.phone}
+                </Text>
+              </View>
+              <Check size={20} color={colors.primary} strokeWidth={2.5} />
+            </View>
+          ) : null}
+
+          <Text className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
+            {filtered.length} müşteri
+            {query.trim() ? ` · “${query.trim()}”` : ''}
+          </Text>
+
+          <View
+            className="overflow-hidden rounded-2xl border border-border bg-card"
+            style={{ maxHeight: 280 }}
+          >
+            <ScrollView
+              nestedScrollEnabled
+              keyboardShouldPersistTaps="handled"
+              style={{ maxHeight: 280 }}
+              contentContainerStyle={{ padding: 8, gap: 8 }}
+            >
+              {filtered.length === 0 ? (
+                <View className="rounded-xl bg-secondary px-4 py-6">
+                  <Text className="text-center text-sm font-medium text-muted-foreground">
+                    Müşteri bulunamadı. "Yeni Müşteri" ile ekleyebilirsin.
+                  </Text>
+                </View>
+              ) : (
+                filtered.map((c) => {
+                  const active = c.id === selectedCustomerId
+                  return (
+                    <Pressable
+                      key={c.id}
+                      onPress={() => onSelectCustomer(c.id)}
                       className={cn(
-                        'text-base font-extrabold',
-                        active ? 'text-primary-foreground' : 'text-secondary-foreground',
+                        'flex-row items-center gap-3 rounded-2xl border-2 bg-card p-3',
+                        active ? 'border-primary bg-primary/5' : 'border-border',
                       )}
                     >
-                      {c.name.charAt(0).toUpperCase()}
-                    </Text>
-                  </View>
-                  <View className="min-w-0 flex-1">
-                    <Text className="font-bold text-foreground" numberOfLines={1}>
-                      {c.name}
-                    </Text>
-                    <Text className="text-sm text-muted-foreground" numberOfLines={1}>
-                      {c.phone}
-                    </Text>
-                  </View>
-                  {active && <Check size={20} color={colors.primary} strokeWidth={2.5} />}
-                </Pressable>
-              )
-            })}
+                      <View
+                        className={cn(
+                          'h-11 w-11 items-center justify-center rounded-xl',
+                          active ? 'bg-primary' : 'bg-secondary',
+                        )}
+                      >
+                        <Text
+                          className={cn(
+                            'text-base font-extrabold',
+                            active ? 'text-primary-foreground' : 'text-secondary-foreground',
+                          )}
+                        >
+                          {c.name.charAt(0).toUpperCase()}
+                        </Text>
+                      </View>
+                      <View className="min-w-0 flex-1">
+                        <Text className="font-bold text-foreground" numberOfLines={1}>
+                          {c.name}
+                        </Text>
+                        <Text className="text-sm text-muted-foreground" numberOfLines={1}>
+                          {c.phone}
+                        </Text>
+                      </View>
+                      {active ? <Check size={20} color={colors.primary} strokeWidth={2.5} /> : null}
+                    </Pressable>
+                  )
+                })
+              )}
+            </ScrollView>
           </View>
         </>
       ) : (

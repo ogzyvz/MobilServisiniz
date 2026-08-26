@@ -1,8 +1,9 @@
 import { useState } from 'react'
-import { Modal, Pressable, ScrollView, Text, TextInput, View } from 'react-native'
+import { Pressable, ScrollView, Text, TextInput, View } from 'react-native'
 import { Check, ChevronDown } from 'lucide-react-native'
 import { cn } from '@/lib/utils'
 import { colors } from '@/lib/theme'
+import { AppSheet, SheetCancelButton } from '@/components/app-modal'
 
 type InputMode = 'text' | 'numeric' | 'tel'
 
@@ -136,48 +137,42 @@ export function SelectField({
         <ChevronDown size={20} color={colors.mutedForeground} />
       </Pressable>
 
-      <Modal
+      <AppSheet
         visible={open}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setOpen(false)}
+        onClose={() => setOpen(false)}
+        title={label}
+        subtitle="Listeden bir seçenek belirleyin"
       >
-        <Pressable
-          onPress={() => setOpen(false)}
-          className="flex-1 justify-end bg-black/40"
-        >
-          <View className="rounded-t-3xl bg-card p-4 pb-8">
-            <Text className="px-2 pb-2 pt-1 text-sm font-bold text-muted-foreground">
-              {label}
-            </Text>
-            <ScrollView className="max-h-72" showsVerticalScrollIndicator={false}>
-              {options.map((o) => {
-                const active = o.value === value
-                return (
-                  <Pressable
-                    key={o.value}
-                    onPress={() => {
-                      onChange(o.value)
-                      setOpen(false)
-                    }}
-                    className="flex-row items-center justify-between rounded-xl px-3 py-4"
-                  >
-                    <Text
-                      className={cn(
-                        'text-base font-semibold',
-                        active ? 'text-primary' : 'text-foreground',
-                      )}
-                    >
-                      {o.label}
-                    </Text>
-                    {active && <Check size={20} color={colors.primary} strokeWidth={2.5} />}
-                  </Pressable>
-                )
-              })}
-            </ScrollView>
-          </View>
-        </Pressable>
-      </Modal>
+        <ScrollView className="max-h-72" showsVerticalScrollIndicator={false}>
+          {options.map((o) => {
+            const active = o.value === value
+            return (
+              <Pressable
+                key={o.value}
+                onPress={() => {
+                  onChange(o.value)
+                  setOpen(false)
+                }}
+                className={cn(
+                  'mb-1 flex-row items-center justify-between rounded-2xl border px-3 py-3.5',
+                  active ? 'border-primary/40 bg-primary/5' : 'border-transparent',
+                )}
+              >
+                <Text
+                  className={cn(
+                    'text-base font-semibold',
+                    active ? 'text-primary' : 'text-foreground',
+                  )}
+                >
+                  {o.label}
+                </Text>
+                {active && <Check size={20} color={colors.primary} strokeWidth={2.5} />}
+              </Pressable>
+            )
+          })}
+        </ScrollView>
+        <SheetCancelButton onPress={() => setOpen(false)} />
+      </AppSheet>
     </View>
   )
 }

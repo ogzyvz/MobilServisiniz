@@ -1,0 +1,79 @@
+@model IReadOnlyList<ShopListItem>
+@using OtoServis.Platform.Services
+@{
+    ViewData["Title"] = "Servisler";
+    var q = ViewBag.Search as string;
+}
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-3 mb-4">
+    <form method="get" class="d-flex gap-2 flex-grow-1" style="max-width:420px">
+        <input type="search" name="q" value="@q" class="form-control" placeholder="Ad, kod, şehir..." />
+        <button type="submit" class="btn btn-outline-primary">Ara</button>
+    </form>
+    <a asp-action="Create" class="btn text-white fw-semibold" style="background:#2f4a86">+ Yeni Servis</a>
+</div>
+
+<div class="card border-0 shadow-sm">
+    <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0">
+            <thead class="table-light">
+            <tr>
+                <th>Servis</th>
+                <th>Kod</th>
+                <th>Plan</th>
+                <th>Lisans</th>
+                <th>Kullanıcı</th>
+                <th>Durum</th>
+                <th></th>
+            </tr>
+            </thead>
+            <tbody>
+            @if (Model.Count == 0)
+            {
+                <tr><td colspan="7" class="text-muted text-center py-4">Servis bulunamadı.</td></tr>
+            }
+            else
+            {
+                foreach (var s in Model)
+                {
+                    <tr>
+                        <td>
+                            <div class="fw-semibold">@s.Name</div>
+                            <div class="small text-muted">@(s.City ?? "-")</div>
+                        </td>
+                        <td><code>@s.TenantCode</code></td>
+                        <td>@s.PlanLabel</td>
+                        <td>
+                            <div>@LicenseHelper.TypeLabel(s.LicenseType)</div>
+                            <div class="small @(s.LicenseStatus == "expired" ? "text-danger fw-semibold" : s.LicenseStatus == "warning" ? "text-warning fw-semibold" : "text-muted")">
+                                @LicenseHelper.StatusLabel(s.LicenseStatus, s.DaysRemaining)
+                                @if (s.LicenseExpiresAt.HasValue)
+                                {
+                                    <span>· @s.LicenseExpiresAt.Value.ToString("dd.MM.yyyy")</span>
+                                }
+                            </div>
+                        </td>
+                        <td>
+                            <span class="@(s.EffectiveMaxUsers.HasValue && s.ActiveUsers >= s.EffectiveMaxUsers ? "text-danger fw-bold" : "")">
+                                @s.ActiveUsers / @(s.EffectiveMaxUsers?.ToString() ?? "∞")
+                            </span>
+                        </td>
+                        <td>
+                            @if (s.IsActive)
+                            {
+                                <span class="badge text-bg-success">Aktif</span>
+                            }
+                            else
+                            {
+                                <span class="badge text-bg-secondary">Pasif</span>
+                            }
+                        </td>
+                        <td class="text-end">
+                            <a asp-action="Details" asp-route-id="@s.Id" class="btn btn-sm btn-outline-primary">Yönet</a>
+                        </td>
+                    </tr>
+                }
+            }
+            </tbody>
+        </table>
+    </div>
+</div>

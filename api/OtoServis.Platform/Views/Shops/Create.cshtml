@@ -1,0 +1,80 @@
+@model CreateShopForm
+@using OtoServis.Platform.Services
+@{
+    ViewData["Title"] = "Yeni Servis";
+    var plans = ViewBag.Plans as IReadOnlyList<PlanOption> ?? [];
+}
+<div class="mb-3">
+    <a asp-action="Index" class="small text-decoration-none">&larr; Servis listesi</a>
+</div>
+
+<div class="card border-0 shadow-sm" style="max-width:640px">
+    <div class="card-body p-4">
+        <form asp-action="Create" method="post">
+            @Html.AntiForgeryToken()
+            <div asp-validation-summary="ModelOnly" class="alert alert-danger py-2 small"></div>
+
+            <h2 class="h6 fw-bold text-secondary mb-3">Servis</h2>
+            <div class="row g-3 mb-4">
+                <div class="col-md-4">
+                    <label asp-for="TenantCode" class="form-label"></label>
+                    <input asp-for="TenantCode" class="form-control text-uppercase" placeholder="OTO-XXX" />
+                    <span asp-validation-for="TenantCode" class="text-danger small"></span>
+                </div>
+                <div class="col-md-8">
+                    <label asp-for="Name" class="form-label"></label>
+                    <input asp-for="Name" class="form-control" />
+                    <span asp-validation-for="Name" class="text-danger small"></span>
+                </div>
+                <div class="col-md-4">
+                    <label asp-for="City" class="form-label"></label>
+                    <input asp-for="City" class="form-control" />
+                </div>
+                <div class="col-md-4">
+                    <label asp-for="SubscriptionPlan" class="form-label"></label>
+                    <select asp-for="SubscriptionPlan" class="form-select">
+                        @foreach (var p in plans)
+                        {
+                            var users = p.MaxUsers.HasValue ? $"{p.MaxUsers} kullanıcı" : "sınırsız kullanıcı";
+                            <option value="@p.Code">@p.Label — ₺@p.MonthlyPrice.ToString("0") / ay · @users</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <label asp-for="MaxUsers" class="form-label"></label>
+                    <input asp-for="MaxUsers" class="form-control" placeholder="Plan varsayılanı" />
+                </div>
+                <div class="col-md-6">
+                    <label asp-for="LicenseType" class="form-label"></label>
+                    <select asp-for="LicenseType" class="form-select">
+                        @foreach (var t in LicenseHelper.Types)
+                        {
+                            <option value="@t.Code">@t.Label</option>
+                        }
+                    </select>
+                </div>
+            </div>
+
+            <h2 class="h6 fw-bold text-secondary mb-3">Sahip hesabı</h2>
+            <div class="row g-3 mb-4">
+                <div class="col-md-6">
+                    <label asp-for="OwnerName" class="form-label"></label>
+                    <input asp-for="OwnerName" class="form-control" />
+                    <span asp-validation-for="OwnerName" class="text-danger small"></span>
+                </div>
+                <div class="col-md-6">
+                    <label asp-for="OwnerPhone" class="form-label"></label>
+                    <input asp-for="OwnerPhone" class="form-control" />
+                    <span asp-validation-for="OwnerPhone" class="text-danger small"></span>
+                </div>
+                <div class="col-md-6">
+                    <label asp-for="OwnerPassword" class="form-label"></label>
+                    <input asp-for="OwnerPassword" class="form-control" />
+                    <span asp-validation-for="OwnerPassword" class="text-danger small"></span>
+                </div>
+            </div>
+
+            <button type="submit" class="btn text-white fw-semibold" style="background:#2f4a86">Servisi Oluştur</button>
+        </form>
+    </div>
+</div>

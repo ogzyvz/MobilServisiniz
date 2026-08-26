@@ -1,6 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Pressable, ScrollView, Text, TextInput, View } from 'react-native'
-import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import { Pressable, RefreshControl, ScrollView, Text, TextInput, View } from 'react-native'
 import { Search, Plus, CarFront } from 'lucide-react-native'
 import { cn } from '@/lib/utils'
 import { STATUS_LABELS, type JobStatus, type Vehicle } from '@/lib/types'
@@ -14,6 +13,8 @@ const filters: { key: VehicleListFilter; label: string }[] = [
   { key: 'bekliyor', label: STATUS_LABELS.bekliyor },
   { key: 'islemde', label: STATUS_LABELS.islemde },
   { key: 'tamamlandi', label: STATUS_LABELS.tamamlandi },
+  { key: 'odeme_tamamlandi', label: STATUS_LABELS.odeme_tamamlandi },
+  { key: 'teslim_edildi', label: STATUS_LABELS.teslim_edildi },
 ]
 
 export function VehicleList({
@@ -21,16 +22,18 @@ export function VehicleList({
   onOpenVehicle,
   onNewVehicle,
   initialFilter = 'all',
+  onRefresh,
 }: {
   vehicles: Vehicle[]
   onOpenVehicle: (id: string) => void
   onNewVehicle: () => void
   /** Dashboard'daki durum kartlarından gelindiğinde önceden seçili filtre. */
   initialFilter?: VehicleListFilter
+  onRefresh?: () => Promise<void>
 }) {
-  const insets = useSafeAreaInsets()
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<VehicleListFilter>(initialFilter)
+  const [refreshing, setRefreshing] = useState(false)
 
   const filtered = useMemo(() => {
     const q = query.trim().toLocaleLowerCase('tr')
@@ -47,15 +50,8 @@ export function VehicleList({
 
   return (
     <View className="flex-1">
-      <View
-        className="bg-background px-5 pb-3"
-        style={{ paddingTop: insets.top + 16 }}
-      >
-        <Text className="text-2xl font-extrabold tracking-tight text-foreground">
-          Araçlar
-        </Text>
-
-        <View className="mt-4 flex-row items-center gap-2 rounded-2xl border border-border bg-card px-4">
+      <View className="bg-background px-5 pb-3 pt-3">
+        <View className="flex-row items-center gap-2 rounded-2xl border border-border bg-card px-4">
           <Search size={20} color={colors.mutedForeground} />
           <TextInput
             value={query}
@@ -100,6 +96,20 @@ export function VehicleList({
         className="flex-1"
         contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 8, paddingBottom: 24 }}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={async () => {
+              if (!onRefresh) return
+              setRefreshing(true)
+              try {
+                await onRefresh()
+              } finally {
+                setRefreshing(false)
+              }
+            }}
+          />
+        }
       >
         {filtered.length === 0 ? (
           <View className="mt-16 items-center">

@@ -10,7 +10,18 @@ builder.Services.AddSingleton<DbFactory>();
 builder.Services.AddScoped<TenantContext>();
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<TenantService>();
+builder.Services.AddScoped<PlanEntitlementsService>();
 builder.Services.AddScoped<DataService>();
+builder.Services.Configure<AiOptions>(builder.Configuration.GetSection("Ai"));
+builder.Services.AddSingleton<OcrScanService>();
+builder.Services.AddHttpClient<AiScanService>(c =>
+{
+    c.Timeout = TimeSpan.FromSeconds(90);
+});
+builder.Services.AddHttpClient<InvoiceScanService>(c =>
+{
+    c.Timeout = TimeSpan.FromSeconds(90);
+});
 
 var jwtKey = builder.Configuration["Jwt:Key"]!;
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
@@ -63,16 +74,43 @@ app.UseSwaggerUI();
 app.UseCors();
 
 Directory.CreateDirectory(Path.Combine(app.Environment.ContentRootPath, "wwwroot", "uploads"));
-app.UseStaticFiles();
+Directory.CreateDirectory(Path.Combine(app.Environment.ContentRootPath, "wwwroot", "releases"));
+var staticTypes = new Microsoft.AspNetCore.StaticFiles.FileExtensionContentTypeProvider();
+staticTypes.Mappings[".apk"] = "application/vnd.android.package-archive";
+app.UseStaticFiles(new StaticFileOptions { ContentTypeProvider = staticTypes });
 
 app.UseAuthentication();
 app.Use(async (ctx, next) =>
 {
     if (ctx.User.Identity?.IsAuthenticated == true)
     {
+        // Anonim auth uçları: istemci yanlışlıkla eski Bearer gönderse bile login çalışsın
+        var path = ctx.Request.Path.Value ?? "";
+        var skipSession =
+            path.StartsWith("/api/auth/login", StringComparison.OrdinalIgnoreCase)
+            || path.StartsWith("/api/auth/lookup-tenant", StringComparison.OrdinalIgnoreCase)
+            || path.StartsWith("/api/app/update-info", StringComparison.OrdinalIgnoreCase);
+
         var tenant = ctx.RequestServices.GetRequiredService<TenantContext>();
         var auth = ctx.RequestServices.GetRequiredService<AuthService>();
         var userId = ctx.User.GetUserId();
+
+        if (!skipSession)
+        {
+            var sessionId = ctx.User.GetSessionId();
+            if (!await auth.ValidateSessionAsync(userId, sessionId))
+            {
+                ctx.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                ctx.Response.ContentType = "application/json";
+                await ctx.Response.WriteAsJsonAsync(new
+                {
+                    error = "Hesabınıza başka bir cihazdan giriş yapıldı. Lütfen tekrar giriş yapın.",
+                    code = "SESSION_REPLACED",
+                });
+                return;
+            }
+        }
+
         var shopId = ctx.User.GetShopId();
         var role = ctx.User.GetShopRole();
 
@@ -80,6 +118,22 @@ app.Use(async (ctx, next) =>
         {
             if (await auth.ValidateShopAccessAsync(userId, shopId.Value))
                 tenant.Set(userId, shopId.Value, role);
+
+            if (!skipSession)
+            {
+                var license = await auth.GetShopLicenseAsync(shopId.Value);
+                if (license?.LicenseStatus == "expired")
+                {
+                    ctx.Response.StatusCode = StatusCodes.Status403Forbidden;
+                    ctx.Response.ContentType = "application/json";
+                    await ctx.Response.WriteAsJsonAsync(new
+                    {
+                        error = "Servis lisans süreniz dolmuştur. Yenileme için lütfen iletişime geçin.",
+                        code = ShopLicenseHelper.ExpiredCode,
+                    });
+                    return;
+                }
+            }
         }
     }
     await next();

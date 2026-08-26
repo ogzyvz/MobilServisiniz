@@ -18,12 +18,19 @@
         <aside class="admin-sidebar">
             <div class="brand">MobilServisiniz Panel</div>
             <div class="shop-name">@shopName</div>
+            @{
+                var plan = Context.Items["PlanEntitlements"] as OtoServis.Admin.Services.AdminPlanEntitlements;
+                var canSuppliers = plan?.Features.Suppliers ?? true;
+            }
             <nav class="admin-nav py-2">
                 <a class="@(controller == "Dashboard" ? "active" : "")" asp-controller="Dashboard" asp-action="Index">📊 Dashboard</a>
                 <a class="@(controller == "Reports" ? "active" : "")" asp-controller="Reports" asp-action="Index">📈 Raporlar</a>
                 <a class="@(controller == "Customers" ? "active" : "")" asp-controller="Customers" asp-action="Index">👥 Müşteriler</a>
                 <a class="@(controller == "Vehicles" ? "active" : "")" asp-controller="Vehicles" asp-action="Index">🚗 Araçlar</a>
-                <a class="@(controller == "Suppliers" ? "active" : "")" asp-controller="Suppliers" asp-action="Index">🚚 Cariler</a>
+                @if (canSuppliers)
+                {
+                    <a class="@(controller == "Suppliers" ? "active" : "")" asp-controller="Suppliers" asp-action="Index">🚚 Cariler</a>
+                }
                 <a class="@(controller == "Categories" ? "active" : "")" asp-controller="Categories" asp-action="Index">🏷️ Kategoriler</a>
             </nav>
         </aside>
@@ -45,6 +52,20 @@
         }
 
         <main class="admin-content">
+            @{
+                var lic = Context.Items["ShopLicense"] as OtoServis.Admin.Services.AdminShopLicense;
+            }
+            @if (lic?.LicenseStatus == "warning")
+            {
+                <div class="alert alert-warning py-2 mb-3">
+                    Lisansınız @(lic.DaysRemaining ?? 0) gün sonra bitiyor
+                    @if (lic.LicenseExpiresAt.HasValue)
+                    {
+                        <span>(@lic.LicenseExpiresAt.Value.ToString("dd.MM.yyyy"))</span>
+                    }
+                    — yenileme için iletişime geçin.
+                </div>
+            }
             @RenderBody()
         </main>
     </div>

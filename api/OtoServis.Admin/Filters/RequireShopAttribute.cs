@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
 using OtoServis.Admin.Services;
@@ -24,7 +25,29 @@ public class RequireShopAttribute : Attribute, IAsyncActionFilter
 
         var tenant = context.HttpContext.RequestServices.GetRequiredService<TenantContext>();
         var data = context.HttpContext.RequestServices.GetRequiredService<AdminDataService>();
+        var auth = context.HttpContext.RequestServices.GetRequiredService<AuthService>();
         data.BindTenant(user);
+
+        var shopId = user.GetShopId();
+        if (shopId.HasValue)
+        {
+            var license = await auth.GetShopLicenseAsync(shopId.Value);
+            if (license?.LicenseStatus == "expired")
+            {
+                await context.HttpContext.SignOutAsync(
+                    Microsoft.AspNetCore.Authentication.Cookies.CookieAuthenticationDefaults.AuthenticationScheme);
+                context.HttpContext.Session.Clear();
+                context.Result = new RedirectToActionResult("Login", "Account", new { expired = 1 });
+                return;
+            }
+
+            context.HttpContext.Items["ShopLicense"] = license;
+
+            await using var conn = await context.HttpContext.RequestServices
+                .GetRequiredService<DbFactory>().OpenAsync();
+            context.HttpContext.Items["PlanEntitlements"] =
+                await PlanEntitlementsHelper.GetForShopAsync(conn, shopId.Value);
+        }
 
         await next();
     }

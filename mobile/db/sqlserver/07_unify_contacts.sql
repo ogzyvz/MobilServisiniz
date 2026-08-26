@@ -45,6 +45,14 @@ USE OtoServis;
 GO
 SET NOCOUNT ON;
 GO
+/* UX_customers_phone filtrelenmiş (WHERE'li) bir unique index; bu tabloya
+   INSERT/UPDATE/DELETE yapabilmek için oturumda QUOTED_IDENTIFIER ve
+   ANSI_NULLS açık olmalı. sqlcmd bağlantılarında varsayılan olarak kapalı
+   gelebiliyor ("Msg 1934" hatasına yol açar) — burada açıkça garanti ediyoruz. */
+SET QUOTED_IDENTIFIER ON;
+GO
+SET ANSI_NULLS ON;
+GO
 
 /* --------------------------------------------------------------------------
    1) customers — yeni alanlar
@@ -140,14 +148,19 @@ BEGIN
                     + @final_phone + N' olarak kaydedildi. Lütfen elle kontrol edin.';
         END
 
-        INSERT INTO dbo.customers
-            (id, shop_id, customer_type, full_name, contact_person, phone, email, address,
-             tax_no, opening_balance, is_active, is_supplier, is_customer, created_at, updated_at)
-        VALUES
-            (@supplier_id, @shop_id, N'kurumsal', @name, @contact, @final_phone, @email, @address,
-             @tax_no, @opening_balance, @is_active, 1, 0, @created_at, @updated_at);
-
-        SET @migrated += 1;
+        BEGIN TRY
+            INSERT INTO dbo.customers
+                (id, shop_id, customer_type, full_name, contact_person, phone, email, address,
+                 tax_no, opening_balance, is_active, is_supplier, is_customer, created_at, updated_at)
+            VALUES
+                (@supplier_id, @shop_id, N'kurumsal', @name, @contact, @final_phone, @email, @address,
+                 @tax_no, @opening_balance, @is_active, 1, 0, @created_at, @updated_at);
+            SET @migrated += 1;
+        END TRY
+        BEGIN CATCH
+            PRINT N'UYARI: Tedarikçi ' + CAST(@supplier_id AS nvarchar(36)) + N' (' + @name
+                + N') taşınamadı: ' + ERROR_MESSAGE();
+        END CATCH
 
         FETCH NEXT FROM supplier_cursor INTO @supplier_id, @shop_id, @name, @contact, @phone, @email,
             @address, @tax_no, @opening_balance, @is_active, @created_at, @updated_at;
@@ -209,11 +222,23 @@ GO
 /* --------------------------------------------------------------------------
    5) vw_SupplierBalance — artık dbo.customers (is_supplier=1) üzerinden
    -------------------------------------------------------------------------- */
+/* NOT: Bu view daha sonra 17_payment_discount_supplier.sql (iskonto) ve
+   20_customer_supplier_balance.sql (shop_id filtresi) tarafından tekrar
+   tanımlanıyor. SUNUCU-GUNCELLE.bat gibi toplu güncelleme betikleri
+   05'ten itibaren HER dosyayı sırayla tekrar çalıştırabiliyor; sunucuda
+   17/20 dosyaları eksik ama bu dosya mevcutsa, burada eski (iskontosuz)
+   tanım yeniden yazılıp önceki düzeltmeyi sessizce geri alıyordu — bu
+   tam olarak yaşanan "iskonto düşmüyor" hatasının sebebiydi. Bu yüzden
+   burada da NİHAİ (iskonto + shop_id filtreli) tanım kullanılıyor. */
 IF OBJECT_ID(N'dbo.vw_SupplierBalance', N'V') IS NOT NULL DROP VIEW dbo.vw_SupplierBalance;
 GO
 CREATE VIEW dbo.vw_SupplierBalance AS
 SELECT c.id AS supplier_id, c.shop_id,
-    c.opening_balance + ISNULL(t.alis_total, 0) - ISNULL(t.odeme_total, 0) - ISNULL(t.iade_total, 0) AS balance,
+    c.opening_balance
+      + ISNULL(t.alis_total, 0)
+      - ISNULL(t.odeme_total, 0)
+      - ISNULL(t.iade_total, 0)
+      - ISNULL(t.iskonto_total, 0) AS balance,
     t.last_transaction_at
 FROM dbo.customers c
 OUTER APPLY (
@@ -221,9 +246,10 @@ OUTER APPLY (
         SUM(CASE WHEN st.type = N'alis' THEN st.amount ELSE 0 END) AS alis_total,
         SUM(CASE WHEN st.type = N'odeme' THEN st.amount ELSE 0 END) AS odeme_total,
         SUM(CASE WHEN st.type = N'iade' THEN st.amount ELSE 0 END) AS iade_total,
+        SUM(CASE WHEN st.type = N'iskonto' THEN st.amount ELSE 0 END) AS iskonto_total,
         MAX(st.created_at) AS last_transaction_at
     FROM dbo.supplier_transactions st
-    WHERE st.supplier_id = c.id
+    WHERE st.supplier_id = c.id AND st.shop_id = c.shop_id
 ) t
 WHERE c.is_supplier = 1;
 GO

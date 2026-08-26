@@ -290,7 +290,12 @@ export async function loadVehicles(): Promise<Vehicle[]> {
     },
     complaints: complaints
       .filter((k) => k.vehicle_id === v.id)
-      .map((k) => ({ id: k.id, text: k.text, createdAt: k.created_at })),
+      .map((k) => ({
+        id: k.id,
+        text: k.text,
+        createdAt: k.created_at,
+        category: 'diger' as const,
+      })),
     services: services
       .filter((s) => s.vehicle_id === v.id)
       .map((s) => ({ id: s.id, title: s.title, price: s.price })),

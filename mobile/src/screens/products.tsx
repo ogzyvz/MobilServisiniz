@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
-import { Pressable, ScrollView, Text, TextInput, View } from 'react-native'
-import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import { Search, Plus, Package, ArrowLeft, Pencil, AlertTriangle } from 'lucide-react-native'
+import { Alert, Pressable, RefreshControl, ScrollView, Text, TextInput, View } from 'react-native'
+import { KeyboardAwareScrollView } from '@/components/keyboard-aware-scroll'
+import { Search, Plus, Package, ArrowLeft, Pencil, AlertTriangle, Trash2, Truck, BarChart3 } from 'lucide-react-native'
 import { cn } from '@/lib/utils'
 import {
   STOCK_CATEGORY_LABELS,
@@ -25,15 +25,49 @@ export function Products({
   products,
   onAdd,
   onUpdate,
+  onDelete,
+  onRefresh,
+  onImportPurchase,
+  onOpenReports,
 }: {
   products: StockProduct[]
-  onAdd: (p: Omit<StockProduct, 'id'>) => void
-  onUpdate: (id: string, p: Omit<StockProduct, 'id'>) => void
+  onAdd: (p: Omit<StockProduct, 'id'>) => void | Promise<void>
+  onUpdate: (id: string, p: Omit<StockProduct, 'id'>) => void | Promise<void>
+  onDelete?: (id: string) => void | Promise<void>
+  onRefresh?: () => Promise<void>
+  onImportPurchase?: () => void
+  onOpenReports?: () => void
 }) {
-  const insets = useSafeAreaInsets()
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<Filter>('all')
   const [editing, setEditing] = useState<StockProduct | 'new' | null>(null)
+  const [refreshing, setRefreshing] = useState(false)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+
+  function confirmDelete(p: StockProduct) {
+    if (!onDelete) return
+    Alert.alert(
+      'Ürünü sil',
+      `"${p.name}" stoktan silinsin mi?\n\nBu ürün bir iş emrinde kullanıldıysa veya alış/satış hareketi varsa silinemez; önce ilgili hareketi kaldırmanız gerekir.`,
+      [
+        { text: 'Vazgeç', style: 'cancel' },
+        {
+          text: 'Sil',
+          style: 'destructive',
+          onPress: async () => {
+            setDeletingId(p.id)
+            try {
+              await onDelete(p.id)
+            } catch {
+              /* hata mesajı üst seviyede zaten gösterilir */
+            } finally {
+              setDeletingId(null)
+            }
+          },
+        },
+      ],
+    )
+  }
 
   const filters: { key: Filter; label: string }[] = [
     { key: 'all', label: 'Tümü' },
@@ -56,9 +90,9 @@ export function Products({
       <ProductForm
         initial={editing === 'new' ? null : editing}
         onCancel={() => setEditing(null)}
-        onSave={(data) => {
-          if (editing === 'new') onAdd(data)
-          else onUpdate(editing.id, data)
+        onSave={async (data) => {
+          if (editing === 'new') await onAdd(data)
+          else await onUpdate(editing.id, data)
           setEditing(null)
         }}
       />
@@ -67,20 +101,28 @@ export function Products({
 
   return (
     <View className="flex-1">
-      <View className="bg-background px-5 pb-3" style={{ paddingTop: insets.top + 16 }}>
-        <Text className="text-2xl font-extrabold tracking-tight text-foreground">
-          Ürün & Stok
-        </Text>
-        <Text className="mt-1 text-sm text-muted-foreground">
-          {products.length} ürün
-          {lowCount > 0 ? (
-            <Text className="font-semibold text-destructive">
-              {' '}· {lowCount} üründe stok az
-            </Text>
+      <View className="bg-background px-5 pb-3 pt-3">
+        <View className="flex-row items-center justify-between gap-2">
+          <Text className="flex-1 text-sm text-muted-foreground">
+            {products.length} ürün
+            {lowCount > 0 ? (
+              <Text className="font-semibold text-destructive">
+                {' '}· {lowCount} üründe stok az
+              </Text>
+            ) : null}
+          </Text>
+          {onOpenReports ? (
+            <Pressable
+              onPress={onOpenReports}
+              className="flex-row items-center gap-1.5 rounded-xl bg-secondary px-3 py-2"
+            >
+              <BarChart3 size={16} color={colors.secondaryForeground} />
+              <Text className="text-xs font-bold text-secondary-foreground">Raporlar</Text>
+            </Pressable>
           ) : null}
-        </Text>
+        </View>
 
-        <View className="mt-4 flex-row items-center gap-2 rounded-2xl border border-border bg-card px-4">
+        <View className="mt-3 flex-row items-center gap-2 rounded-2xl border border-border bg-card px-4">
           <Search size={20} color={colors.mutedForeground} />
           <TextInput
             value={query}
@@ -120,22 +162,45 @@ export function Products({
           ))}
         </ScrollView>
 
-        <Pressable
-          onPress={() => setEditing('new')}
-          className="mt-3 h-14 w-full flex-row items-center justify-center gap-2 rounded-2xl bg-accent active:opacity-95"
-          style={accentShadow}
-        >
-          <Plus size={24} color={colors.accentForeground} strokeWidth={2.4} />
-          <Text className="text-base font-bold text-accent-foreground">
-            Yeni Ürün Ekle
-          </Text>
-        </Pressable>
+        <View className="mt-3 flex-row gap-2">
+          <Pressable
+            onPress={() => setEditing('new')}
+            className="h-14 flex-1 flex-row items-center justify-center gap-2 rounded-2xl bg-accent active:opacity-95"
+            style={accentShadow}
+          >
+            <Plus size={22} color={colors.accentForeground} strokeWidth={2.4} />
+            <Text className="text-sm font-bold text-accent-foreground">Ürün Ekle</Text>
+          </Pressable>
+          {onImportPurchase ? (
+            <Pressable
+              onPress={onImportPurchase}
+              className="h-14 flex-1 flex-row items-center justify-center gap-2 rounded-2xl bg-primary active:opacity-95"
+            >
+              <Truck size={20} color={colors.primaryForeground} strokeWidth={2.4} />
+              <Text className="text-sm font-bold text-primary-foreground">Dışarıdan Temin</Text>
+            </Pressable>
+          ) : null}
+        </View>
       </View>
 
       <ScrollView
         className="flex-1"
         contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 8, paddingBottom: 24 }}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={async () => {
+              if (!onRefresh) return
+              setRefreshing(true)
+              try {
+                await onRefresh()
+              } finally {
+                setRefreshing(false)
+              }
+            }}
+          />
+        }
       >
         {filtered.length === 0 ? (
           <View className="mt-16 items-center">
@@ -190,12 +255,26 @@ export function Products({
                       </View>
                     </View>
                   </View>
-                  <Pressable
-                    onPress={() => setEditing(p)}
-                    className="h-11 w-11 items-center justify-center rounded-xl bg-secondary"
-                  >
-                    <Pencil size={20} color={colors.secondaryForeground} />
-                  </Pressable>
+                  <View className="flex-row items-center gap-2">
+                    <Pressable
+                      onPress={() => setEditing(p)}
+                      className="h-11 w-11 items-center justify-center rounded-xl bg-secondary"
+                    >
+                      <Pencil size={20} color={colors.secondaryForeground} />
+                    </Pressable>
+                    {onDelete ? (
+                      <Pressable
+                        onPress={() => confirmDelete(p)}
+                        disabled={deletingId === p.id}
+                        className={cn(
+                          'h-11 w-11 items-center justify-center rounded-xl bg-destructive/10',
+                          deletingId === p.id && 'opacity-50',
+                        )}
+                      >
+                        <Trash2 size={20} color={colors.destructive} />
+                      </Pressable>
+                    ) : null}
+                  </View>
                 </View>
               )
             })}
@@ -213,17 +292,17 @@ function ProductForm({
 }: {
   initial: StockProduct | null
   onCancel: () => void
-  onSave: (data: Omit<StockProduct, 'id'>) => void
+  onSave: (data: Omit<StockProduct, 'id'>) => void | Promise<void>
 }) {
-  const insets = useSafeAreaInsets()
   const [name, setName] = useState(initial?.name ?? '')
   const [code, setCode] = useState(initial?.code ?? '')
   const [category, setCategory] = useState<StockCategory>(initial?.category ?? 'diger')
   const [price, setPrice] = useState(initial ? String(initial.price) : '')
   const [stock, setStock] = useState(initial ? String(initial.stock) : '')
   const [error, setError] = useState('')
+  const [saving, setSaving] = useState(false)
 
-  function handleSave() {
+  async function handleSave() {
     if (name.trim().length < 2) {
       setError('Lütfen ürün adını girin.')
       return
@@ -233,21 +312,26 @@ function ProductForm({
       setError('Lütfen geçerli bir fiyat girin.')
       return
     }
-    onSave({
-      name: name.trim(),
-      code: code.trim() || '-',
-      category,
-      price: priceNum,
-      stock: Number(stock) || 0,
-    })
+    setSaving(true)
+    setError('')
+    try {
+      await onSave({
+        name: name.trim(),
+        code: code.trim() || '-',
+        category,
+        price: priceNum,
+        stock: Number(stock) || 0,
+      })
+    } catch {
+      setError('Kayıt başarısız. Bilgileri kontrol edip tekrar deneyin.')
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
     <View className="flex-1">
-      <View
-        className="flex-row items-center gap-3 bg-background px-5 pb-3"
-        style={{ paddingTop: insets.top + 16 }}
-      >
+      <View className="flex-row items-center gap-3 bg-background px-5 pb-3 pt-3">
         <Pressable
           onPress={onCancel}
           className="h-11 w-11 items-center justify-center rounded-xl bg-secondary"
@@ -259,10 +343,10 @@ function ProductForm({
         </Text>
       </View>
 
-      <ScrollView
+      <KeyboardAwareScrollView
         className="flex-1"
-        contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 8, paddingBottom: 24 }}
-        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 8 }}
+        basePaddingBottom={48}
         showsVerticalScrollIndicator={false}
       >
         <View className="flex flex-col gap-4">
@@ -306,15 +390,19 @@ function ProductForm({
 
           <Pressable
             onPress={handleSave}
-            className="mt-1 h-14 items-center justify-center rounded-xl bg-primary active:opacity-95"
+            disabled={saving}
+            className={cn(
+              'mt-1 h-14 items-center justify-center rounded-xl bg-primary active:opacity-95',
+              saving && 'opacity-70',
+            )}
             style={primaryShadow}
           >
             <Text className="text-base font-extrabold text-primary-foreground">
-              {initial ? 'Değişiklikleri Kaydet' : 'Ürünü Kaydet'}
+              {saving ? 'Kaydediliyor…' : initial ? 'Değişiklikleri Kaydet' : 'Ürünü Kaydet'}
             </Text>
           </Pressable>
         </View>
-      </ScrollView>
+      </KeyboardAwareScrollView>
     </View>
   )
 }

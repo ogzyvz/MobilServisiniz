@@ -1,0 +1,186 @@
+:root {
+    --os-primary: #2f4a86;
+    --os-primary-dark: #243a6b;
+    --os-accent: #e07d33;
+    --os-sidebar: #1e2f52;
+    --os-bg: #f4f6fa;
+}
+
+body {
+    background: var(--os-bg);
+    font-family: "Segoe UI", system-ui, sans-serif;
+}
+
+.admin-shell {
+    min-height: 100vh;
+    display: flex;
+}
+
+.admin-sidebar {
+    width: 260px;
+    background: linear-gradient(180deg, var(--os-sidebar), #162544);
+    color: #fff;
+    flex-shrink: 0;
+}
+
+.admin-sidebar .brand {
+    padding: 1.25rem 1.5rem;
+    font-weight: 800;
+    font-size: 1.15rem;
+    border-bottom: 1px solid rgba(255,255,255,.08);
+}
+
+.admin-sidebar .shop-name {
+    padding: .75rem 1.5rem;
+    font-size: .8rem;
+    color: rgba(255,255,255,.65);
+    border-bottom: 1px solid rgba(255,255,255,.08);
+}
+
+.admin-nav a {
+    display: flex;
+    align-items: center;
+    gap: .6rem;
+    padding: .75rem 1.5rem;
+    color: rgba(255,255,255,.85);
+    text-decoration: none;
+    font-weight: 600;
+    font-size: .92rem;
+}
+
+.admin-nav a:hover,
+.admin-nav a.active {
+    background: rgba(255,255,255,.1);
+    color: #fff;
+}
+
+.admin-main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.admin-topbar {
+    background: #fff;
+    border-bottom: 1px solid #e5e9f2;
+    padding: .85rem 1.5rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.admin-content {
+    padding: 1.5rem;
+}
+
+.stat-card {
+    background: #fff;
+    border-radius: 14px;
+    padding: 1.25rem;
+    border: 1px solid #e8edf5;
+    box-shadow: 0 2px 8px rgba(47,74,134,.06);
+    height: 100%;
+}
+
+.stat-card .label {
+    color: #6b7a90;
+    font-size: .85rem;
+    font-weight: 600;
+}
+
+.stat-card .value {
+    font-size: 2rem;
+    font-weight: 800;
+    color: var(--os-primary);
+    line-height: 1.1;
+}
+
+.page-title {
+    font-size: 1.6rem;
+    font-weight: 800;
+    color: #1a2740;
+}
+
+.card-panel {
+    background: #fff;
+    border-radius: 14px;
+    border: 1px solid #e8edf5;
+    box-shadow: 0 2px 8px rgba(47,74,134,.05);
+}
+
+.login-wrap {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(135deg, var(--os-primary), var(--os-sidebar));
+}
+
+.login-card {
+    width: 100%;
+    max-width: 420px;
+    background: #fff;
+    border-radius: 18px;
+    padding: 2rem;
+    box-shadow: 0 20px 50px rgba(0,0,0,.2);
+}
+
+.badge-status {
+    font-size: .75rem;
+    font-weight: 700;
+    padding: .35rem .65rem;
+    border-radius: 999px;
+}
+
+.badge-bekliyor { background: #fff3cd; color: #856404; }
+.badge-islemde { background: #cfe2ff; color: #084298; }
+.badge-tamamlandi { background: #d1e7dd; color: #0f5132; }
+.badge-teslim_edildi { background: #e2e3e5; color: #41464b; }
+
+.report-link-card {
+    text-decoration: none;
+    color: inherit;
+    display: block;
+    transition: transform .15s, box-shadow .15s;
+}
+
+.report-link-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(47,74,134,.12);
+}
+
+.report-icon {
+    font-size: 1.75rem;
+}
+
+@media print {
+    .admin-sidebar,
+    .admin-topbar,
+    .no-print {
+        display: none !important;
+    }
+
+    .admin-shell,
+    .admin-main,
+    .admin-content {
+        display: block !important;
+        width: 100% !important;
+        padding: 0 !important;
+    }
+
+    .print-only {
+        display: block !important;
+    }
+
+    .card-panel,
+    .stat-card {
+        box-shadow: none !important;
+        border: 1px solid #ddd !important;
+        break-inside: avoid;
+    }
+
+    body {
+        background: #fff !important;
+    }
+}

@@ -1,0 +1,72 @@
+@model AppReleaseForm
+@{
+    ViewData["Title"] = "Uygulama Sürümü";
+}
+
+@if (TempData["Flash"] is string flash)
+{
+    <div class="alert alert-success py-2">@flash</div>
+}
+
+<div class="card border-0 shadow-sm">
+    <div class="card-body">
+        <h1 class="h4 mb-1">Mobil APK sürümü</h1>
+        <p class="text-muted small mb-4">
+            Kullanıcılar uygulama açılışında bu bilgilere göre güncelleme uyarısı veya zorunlu güncelleme görür.
+            APK yüklenince <code>wwwroot/releases/MobilServisiniz.apk</code> üzerine yazılır.
+        </p>
+
+        <form asp-action="Index" method="post" enctype="multipart/form-data">
+            @Html.AntiForgeryToken()
+            <div asp-validation-summary="ModelOnly" class="text-danger mb-3"></div>
+
+            <div class="row g-3">
+                <div class="col-md-4">
+                    <label asp-for="LatestVersion" class="form-label"></label>
+                    <input asp-for="LatestVersion" class="form-control" />
+                    <span asp-validation-for="LatestVersion" class="text-danger small"></span>
+                </div>
+                <div class="col-md-4">
+                    <label asp-for="LatestVersionCode" class="form-label"></label>
+                    <input asp-for="LatestVersionCode" class="form-control" type="number" min="1" />
+                    <span asp-validation-for="LatestVersionCode" class="text-danger small"></span>
+                </div>
+                <div class="col-md-4">
+                    <label asp-for="MinVersionCode" class="form-label"></label>
+                    <input asp-for="MinVersionCode" class="form-control" type="number" min="1" />
+                    <span asp-validation-for="MinVersionCode" class="text-danger small"></span>
+                </div>
+                <div class="col-12">
+                    <div class="form-check">
+                        <input asp-for="ForceThisVersion" class="form-check-input" />
+                        <label asp-for="ForceThisVersion" class="form-check-label"></label>
+                    </div>
+                </div>
+                <div class="col-12">
+                    <label asp-for="ApkUrl" class="form-label"></label>
+                    <input asp-for="ApkUrl" class="form-control" />
+                    <div class="form-text">APK yüklediğinizde bu alan otomatik güncellenir.</div>
+                </div>
+                <div class="col-12">
+                    <label class="form-label">APK dosyası</label>
+                    <input type="file" name="apkFile" accept=".apk,application/vnd.android.package-archive" class="form-control" />
+                </div>
+                <div class="col-12">
+                    <label asp-for="ReleaseNotes" class="form-label"></label>
+                    <textarea asp-for="ReleaseNotes" class="form-control" rows="3"></textarea>
+                </div>
+            </div>
+
+            @if (Model.UpdatedAt.HasValue)
+            {
+                <p class="text-muted small mt-3 mb-0">
+                    Son güncelleme (UTC): @Model.UpdatedAt.Value.ToString("yyyy-MM-dd HH:mm")
+                </p>
+            }
+
+            <div class="mt-4">
+                <button type="submit" class="btn btn-primary">Kaydet</button>
+            </div>
+        </form>
+    </div>
+</div>

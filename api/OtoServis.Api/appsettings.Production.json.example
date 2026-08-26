@@ -1,4 +1,4 @@
-{
+﻿{
   "ConnectionStrings": {
     "Default": "Server=YOUR_SERVER;Database=OtoServis;User Id=YOUR_USER;Password=YOUR_PASSWORD;TrustServerCertificate=True;Encrypt=True;"
   },
@@ -14,6 +14,16 @@
         "Url": "http://0.0.0.0:5280"
       }
     }
+  },
+  "Ai": {
+    "GeminiApiKey": "YOUR_GEMINI_API_KEY",
+    "OpenAiApiKey": "YOUR_OPENAI_API_KEY_OPTIONAL",
+    "Providers": [
+      { "Name": "gemini", "Model": "gemini-3.5-flash-lite" },
+      { "Name": "gemini", "Model": "gemini-3.5-flash" },
+      { "Name": "openai", "Model": "gpt-4o-mini" },
+      { "Name": "ocr", "Model": "tesseract" }
+    ]
   },
   "Logging": {
     "LogLevel": {

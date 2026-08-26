@@ -13,17 +13,35 @@ public class AuthController(AuthService auth) : ControllerBase
     [AllowAnonymous]
     public async Task<ActionResult<AuthResponse>> Login([FromBody] LoginRequest req)
     {
-        if (string.IsNullOrWhiteSpace(req.TenantCode))
-            return BadRequest(new { error = "Servis kodu gerekli." });
+        var identifier = (req.Identifier ?? req.Phone)?.Trim();
+        if (string.IsNullOrWhiteSpace(identifier))
+            return BadRequest(new { error = "Telefon veya kullanıcı adı gerekli." });
+        if (string.IsNullOrWhiteSpace(req.Password))
+            return BadRequest(new { error = "Şifre gerekli." });
 
-        var shop = await auth.LookupTenantAsync(req.TenantCode);
-        if (shop is null)
-            return Unauthorized(new { error = "Servis kodu geçersiz." });
+        // Eski istemciler hâlâ tenant kodu gönderebilir; gönderilmişse doğrula.
+        if (!string.IsNullOrWhiteSpace(req.TenantCode))
+        {
+            var shop = await auth.LookupTenantAsync(req.TenantCode);
+            if (shop is null)
+                return Unauthorized(new { error = "Servis kodu geçersiz." });
+        }
 
-        var result = await auth.LoginAsync(req.TenantCode, req.Phone, req.Password);
-        if (result is null)
-            return Unauthorized(new { error = "Telefon, şifre veya servis yetkisi hatalı." });
-        return Ok(result);
+        try
+        {
+            var result = await auth.LoginAsync(identifier, req.Password, req.TenantCode);
+            if (result is null)
+                return Unauthorized(new { error = "Telefon/kullanıcı adı veya şifre hatalı." });
+            return Ok(result);
+        }
+        catch (ShopLicenseExpiredException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new
+            {
+                error = ex.Message,
+                code = ShopLicenseHelper.ExpiredCode,
+            });
+        }
     }
 
     [HttpGet("lookup-tenant")]
@@ -41,9 +59,40 @@ public class AuthController(AuthService auth) : ControllerBase
     public async Task<ActionResult<AuthResponse>> SelectShop([FromBody] SelectShopRequest req)
     {
         var userId = User.GetUserId();
-        var result = await auth.SelectShopAsync(userId, req.ShopId);
-        if (result is null) return Forbid();
-        return Ok(result);
+        try
+        {
+            var result = await auth.SelectShopAsync(userId, req.ShopId);
+            if (result is null) return Forbid();
+            return Ok(result);
+        }
+        catch (ShopLicenseExpiredException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new
+            {
+                error = ex.Message,
+                code = ShopLicenseHelper.ExpiredCode,
+            });
+        }
+    }
+
+    [HttpGet("license")]
+    [Authorize]
+    public async Task<ActionResult<ShopLicenseDto>> GetLicense()
+    {
+        var shopId = User.GetShopId();
+        if (shopId is null) return Unauthorized();
+        var license = await auth.GetShopLicenseAsync(shopId.Value);
+        return license is null ? NotFound() : Ok(license);
+    }
+
+    [HttpGet("entitlements")]
+    [Authorize]
+    public async Task<ActionResult<PlanEntitlementsDto>> GetEntitlements()
+    {
+        var shopId = User.GetShopId();
+        if (shopId is null) return Unauthorized();
+        var ent = await auth.GetEntitlementsAsync(shopId.Value);
+        return ent is null ? NotFound() : Ok(ent);
     }
 
     [HttpGet("shops")]
@@ -77,6 +126,113 @@ public class DashboardController(DataService data) : ControllerBase
 }
 
 [ApiController]
+[Route("api/reports")]
+[Authorize]
+public class ReportsController(DataService data) : ControllerBase
+{
+    [HttpGet("payments-pending")]
+    public async Task<ActionResult<PaymentsPendingReportDto>> PaymentsPending()
+    {
+        if (User.GetShopRole() == "personel")
+            return Forbid();
+        return Ok(await data.GetPaymentsPendingAsync());
+    }
+
+    [HttpGet("cash-today")]
+    public async Task<ActionResult<CashTodayReportDto>> CashToday()
+    {
+        if (User.GetShopRole() == "personel")
+            return Forbid();
+        return Ok(await data.GetCashTodayAsync());
+    }
+
+    [HttpGet("stock-usage")]
+    public async Task<ActionResult> StockUsage([FromQuery] DateOnly from, [FromQuery] DateOnly to)
+    {
+        if (User.GetShopRole() == "personel") return Forbid();
+        try
+        {
+            return Ok(await data.GetStockUsageReportAsync(from, to));
+        }
+        catch (PlanFeatureDeniedException ex) { return ex.ToActionResult(); }
+    }
+
+    [HttpGet("stock-purchase-sale")]
+    public async Task<ActionResult> StockPurchaseSale([FromQuery] DateOnly from, [FromQuery] DateOnly to)
+    {
+        if (User.GetShopRole() == "personel") return Forbid();
+        try
+        {
+            return Ok(await data.GetStockPurchaseSaleReportAsync(from, to));
+        }
+        catch (PlanFeatureDeniedException ex) { return ex.ToActionResult(); }
+    }
+
+    [HttpGet("stock-movements")]
+    public async Task<ActionResult> StockMovements(
+        [FromQuery] Guid? stockProductId, [FromQuery] string name,
+        [FromQuery] DateOnly from, [FromQuery] DateOnly to)
+    {
+        if (User.GetShopRole() == "personel") return Forbid();
+        return Ok(await data.GetStockMovementDetailAsync(stockProductId, name, from, to));
+    }
+
+    [HttpGet("account-ledger")]
+    public async Task<ActionResult> AccountLedger([FromQuery] DateOnly from, [FromQuery] DateOnly to)
+    {
+        if (User.GetShopRole() == "personel") return Forbid();
+        return Ok(await data.GetAccountLedgerReportAsync(from, to));
+    }
+
+    [HttpGet("customer-ledger")]
+    public async Task<ActionResult> CustomerLedger(
+        [FromQuery] Guid customerId, [FromQuery] DateOnly from, [FromQuery] DateOnly to)
+    {
+        if (User.GetShopRole() == "personel") return Forbid();
+        return Ok(await data.GetCustomerLedgerDetailAsync(customerId, from, to));
+    }
+
+    [HttpGet("sales")]
+    public async Task<ActionResult<SalesReportDto>> Sales([FromQuery] DateOnly from, [FromQuery] DateOnly to)
+    {
+        if (User.GetShopRole() == "personel") return Forbid();
+        return Ok(await data.GetSalesReportAsync(from, to));
+    }
+}
+
+[ApiController]
+[Route("api/shop")]
+[Authorize]
+public class ShopController(DataService data) : ControllerBase
+{
+    [HttpGet("payment-info")]
+    public async Task<ActionResult<ShopPaymentInfoDto>> PaymentInfo()
+    {
+        if (User.GetShopRole() == "personel")
+            return Forbid();
+        var info = await data.GetShopPaymentInfoAsync();
+        return info is null ? NotFound() : Ok(info);
+    }
+
+    [HttpPut("payment-info")]
+    public async Task<ActionResult<ShopPaymentInfoDto>> UpdatePaymentInfo(
+        [FromBody] UpdateShopPaymentInfoRequest req)
+    {
+        if (User.GetShopRole() == "personel")
+            return Forbid();
+        try
+        {
+            var info = await data.UpdateShopPaymentInfoAsync(req);
+            return info is null ? NotFound() : Ok(info);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+    }
+}
+
+[ApiController]
 [Route("api/[controller]")]
 [Authorize]
 public class CustomersController(DataService data) : ControllerBase
@@ -97,6 +253,7 @@ public class CustomersController(DataService data) : ControllerBase
         {
             return Conflict(new { error = ex.Message });
         }
+        catch (PlanFeatureDeniedException ex) { return ex.ToActionResult(); }
     }
 
     [HttpPut("{id:guid}")]
@@ -104,14 +261,19 @@ public class CustomersController(DataService data) : ControllerBase
     {
         try
         {
-            var updated = await data.UpdateCustomerAsync(id, req);
+            var updated = await data.UpdateCustomerAsync(id, req, User.GetUserId());
             return updated is null ? NotFound() : Ok(updated);
         }
         catch (CustomerPhoneConflictException ex)
         {
             return Conflict(new { error = ex.Message });
         }
+        catch (PlanFeatureDeniedException ex) { return ex.ToActionResult(); }
     }
+
+    [HttpGet("{id:guid}/activity")]
+    public async Task<ActionResult> Activity(Guid id)
+        => Ok(await data.GetCustomerActivityAsync(id));
 }
 
 [ApiController]
@@ -135,6 +297,7 @@ public class VehiclesController(DataService data) : ControllerBase
         {
             return Conflict(ex.Conflict);
         }
+        catch (PlanLimitExceededException ex) { return ex.ToActionResult(); }
         catch (Microsoft.Data.SqlClient.SqlException ex) when (ex.Number is 2601 or 2627)
         {
             return Conflict(new { error = "Bu plaka zaten kayıtlı." });
@@ -144,15 +307,24 @@ public class VehiclesController(DataService data) : ControllerBase
     [HttpPost("{id:guid}/transfer")]
     public async Task<ActionResult<TransferVehicleResponse>> Transfer(Guid id, [FromBody] TransferVehicleRequest req)
     {
-        var result = await data.TransferVehicleOwnerAsync(id, req, User.GetUserId());
-        return result is null ? NotFound(new { error = "Araç veya müşteri bulunamadı." }) : Ok(result);
+        try
+        {
+            var result = await data.TransferVehicleOwnerAsync(id, req, User.GetUserId());
+            return result is null ? NotFound(new { error = "Araç veya müşteri bulunamadı." }) : Ok(result);
+        }
+        catch (PlanLimitExceededException ex) { return ex.ToActionResult(); }
     }
 
     [HttpPost("{id:guid}/new-visit")]
     public async Task<ActionResult<OpenNewVisitResponse>> NewVisit(Guid id, [FromBody] OpenNewVisitRequest req)
     {
-        var result = await data.OpenNewVisitAsync(id, User.GetUserId(), req.Complaint);
-        return result is null ? NotFound(new { error = "Araç bulunamadı." }) : Ok(result);
+        try
+        {
+            var result = await data.OpenNewVisitAsync(
+                id, User.GetUserId(), req.Complaint, req.ComplaintCategory);
+            return result is null ? NotFound(new { error = "Araç bulunamadı." }) : Ok(result);
+        }
+        catch (PlanLimitExceededException ex) { return ex.ToActionResult(); }
     }
 }
 
@@ -173,20 +345,65 @@ public class StockController(DataService data) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult> List([FromQuery] string? category, [FromQuery] string? search)
-        => Ok(await data.GetStockAsync(category, search));
+    {
+        try { return Ok(await data.GetStockAsync(category, search)); }
+        catch (PlanFeatureDeniedException ex) { return ex.ToActionResult(); }
+    }
 
     [HttpPost]
     public async Task<ActionResult<StockProductDto>> Create([FromBody] CreateStockRequest req)
     {
-        var created = await data.CreateStockAsync(req);
-        return created is null ? BadRequest() : Ok(created);
+        try
+        {
+            var created = await data.CreateStockAsync(req);
+            return created is null ? BadRequest() : Ok(created);
+        }
+        catch (PlanFeatureDeniedException ex) { return ex.ToActionResult(); }
     }
 
     [HttpPut("{id:guid}")]
     public async Task<ActionResult<StockProductDto>> Update(Guid id, [FromBody] UpdateStockRequest req)
     {
-        var updated = await data.UpdateStockAsync(id, req);
-        return updated is null ? NotFound() : Ok(updated);
+        try
+        {
+            var updated = await data.UpdateStockAsync(id, req);
+            return updated is null ? NotFound() : Ok(updated);
+        }
+        catch (PlanFeatureDeniedException ex) { return ex.ToActionResult(); }
+    }
+
+    [HttpDelete("{id:guid}")]
+    public async Task<ActionResult> Delete(Guid id)
+    {
+        try
+        {
+            var result = await data.DeleteStockAsync(id);
+            return result is null ? NotFound() : NoContent();
+        }
+        catch (PlanFeatureDeniedException ex) { return ex.ToActionResult(); }
+        catch (StockInUseException ex)
+        {
+            return Conflict(new { error = ex.Message });
+        }
+    }
+
+    [HttpPost("import-purchase")]
+    public async Task<ActionResult<ImportPurchaseResponse>> ImportPurchase([FromBody] ImportPurchaseRequest req)
+    {
+        try
+        {
+            var result = await data.ImportPurchaseAsync(req, User.GetUserId());
+            return Ok(result);
+        }
+        catch (PlanFeatureDeniedException ex) { return ex.ToActionResult(); }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+        catch (Microsoft.Data.SqlClient.SqlException ex) when (ex.Number >= 50000)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
     }
 }
 
@@ -204,6 +421,25 @@ public class WorkOrdersController(DataService data) : ControllerBase
     {
         var wo = await data.GetWorkOrderDetailAsync(id);
         return wo is null ? NotFound() : Ok(wo);
+    }
+
+    /// <summary>Yalnızca bekliyor (işleme alınmamış) iş emrini sistemden siler.</summary>
+    [HttpDelete("{id:guid}")]
+    public async Task<ActionResult> DeleteWaiting(Guid id)
+    {
+        try
+        {
+            var ok = await data.DeleteWaitingWorkOrderAsync(id, User.GetUserId());
+            return ok ? NoContent() : NotFound();
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+        catch (Microsoft.Data.SqlClient.SqlException ex) when (ex.Number >= 50000)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
     }
 
     [HttpPatch("{id:guid}/status")]
@@ -225,6 +461,65 @@ public class WorkOrdersController(DataService data) : ControllerBase
         }
     }
 
+    [HttpGet("{id:guid}/payments")]
+    public async Task<ActionResult<IReadOnlyList<WorkOrderPaymentDto>>> ListPayments(Guid id)
+    {
+        var rows = await data.GetWorkOrderPaymentsAsync(id);
+        return rows is null ? NotFound() : Ok(rows);
+    }
+
+    [HttpPost("{id:guid}/payments")]
+    public async Task<ActionResult<WorkOrderPaymentResultDto>> AddPayment(
+        Guid id, [FromBody] RecordWorkOrderPaymentRequest req)
+    {
+        try
+        {
+            var result = await data.AddWorkOrderPaymentAsync(id, req, User.GetUserId());
+            return result is null ? NotFound() : Ok(result);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+    }
+
+    [HttpPut("{id:guid}/payments/{paymentId:guid}")]
+    public async Task<ActionResult<WorkOrderPaymentResultDto>> UpdatePayment(
+        Guid id, Guid paymentId, [FromBody] UpdateWorkOrderPaymentRequest req)
+    {
+        try
+        {
+            var result = await data.UpdateWorkOrderPaymentAsync(id, paymentId, req, User.GetUserId());
+            return result is null ? NotFound() : Ok(result);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+    }
+
+    [HttpDelete("{id:guid}/payments/{paymentId:guid}")]
+    public async Task<ActionResult<WorkOrderPaymentResultDto>> DeletePayment(Guid id, Guid paymentId)
+    {
+        var result = await data.DeleteWorkOrderPaymentAsync(id, paymentId, User.GetUserId());
+        return result is null ? NotFound() : Ok(result);
+    }
+
+    [HttpPut("{id:guid}/discount")]
+    public async Task<ActionResult<WorkOrderPaymentResultDto>> UpdateDiscount(
+        Guid id, [FromBody] UpdateWorkOrderDiscountRequest req)
+    {
+        try
+        {
+            var result = await data.UpdateWorkOrderDiscountAsync(id, req, User.GetUserId());
+            return result is null ? NotFound() : Ok(result);
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+    }
+
     [HttpGet("{id:guid}/history")]
     public async Task<ActionResult> GetHistory(Guid id)
     {
@@ -235,14 +530,14 @@ public class WorkOrdersController(DataService data) : ControllerBase
     [HttpPost("{id:guid}/complaints")]
     public async Task<ActionResult> AddComplaint(Guid id, [FromBody] AddComplaintRequest req)
     {
-        var ok = await data.AddComplaintAsync(id, req.Description);
-        return ok ? NoContent() : NotFound();
+        var complaintId = await data.AddComplaintAsync(id, req.Description, req.Category);
+        return complaintId is null ? NotFound() : Ok(new { id = complaintId });
     }
 
     [HttpPut("{id:guid}/complaints/{complaintId:guid}")]
     public async Task<ActionResult> UpdateComplaint(Guid id, Guid complaintId, [FromBody] UpdateComplaintRequest req)
     {
-        var ok = await data.UpdateComplaintAsync(id, complaintId, req.Description);
+        var ok = await data.UpdateComplaintAsync(id, complaintId, req.Description, req.Category);
         return ok ? NoContent() : NotFound();
     }
 
@@ -251,8 +546,8 @@ public class WorkOrdersController(DataService data) : ControllerBase
     {
         try
         {
-            var ok = await data.AddServiceAsync(id, req, User.GetUserId());
-            return ok ? NoContent() : NotFound();
+            var serviceId = await data.AddServiceAsync(id, req, User.GetUserId());
+            return serviceId is null ? NotFound() : Ok(new { id = serviceId });
         }
         catch (WorkOrderCompletedException ex)
         {
@@ -268,6 +563,7 @@ public class WorkOrdersController(DataService data) : ControllerBase
             await data.AddPartAsync(id, req, User.GetUserId());
             return NoContent();
         }
+        catch (PlanFeatureDeniedException ex) { return ex.ToActionResult(); }
         catch (WorkOrderCompletedException ex)
         {
             return Conflict(new { error = ex.Message });
@@ -276,15 +572,26 @@ public class WorkOrdersController(DataService data) : ControllerBase
         {
             return BadRequest(new { error = ex.Message });
         }
+        catch (Microsoft.Data.SqlClient.SqlException ex)
+        {
+            return StatusCode(500, new { error = ex.Message });
+        }
     }
 
     [HttpPost("{id:guid}/images")]
     [RequestSizeLimit(6_000_000)]
-    public async Task<ActionResult<WorkOrderImageDto>> UploadImage(Guid id, IFormFile file, [FromForm] string imageType)
+    [RequestFormLimits(MultipartBodyLengthLimit = 6_000_000)]
+    public async Task<ActionResult<WorkOrderImageDto>> UploadImage(
+        Guid id, IFormFile? file, [FromForm] string imageType,
+        [FromForm] string? complaintId, [FromForm] string? serviceId)
     {
+        if (file is null || file.Length == 0)
+            return BadRequest(new { error = "Fotoğraf dosyası gerekli." });
         try
         {
-            var img = await data.AddWorkOrderImageAsync(id, file, imageType, User.GetUserId());
+            Guid? complaintGuid = Guid.TryParse(complaintId, out var cId) ? cId : null;
+            Guid? serviceGuid = Guid.TryParse(serviceId, out var sId) ? sId : null;
+            var img = await data.AddWorkOrderImageAsync(id, file, imageType, User.GetUserId(), complaintGuid, serviceGuid);
             return img is null ? NotFound() : Ok(img);
         }
         catch (ImageTooLargeException ex)
@@ -294,6 +601,14 @@ public class WorkOrdersController(DataService data) : ControllerBase
         catch (ImageLimitExceededException ex)
         {
             return BadRequest(new { error = ex.Message });
+        }
+        catch (Microsoft.Data.SqlClient.SqlException ex)
+        {
+            return StatusCode(500, new { error = ex.Message });
+        }
+        catch (IOException ex)
+        {
+            return StatusCode(500, new { error = "Fotoğraf kaydedilemedi: " + ex.Message });
         }
     }
 
@@ -307,29 +622,47 @@ public class WorkOrdersController(DataService data) : ControllerBase
     [HttpPatch("{id:guid}/services/{serviceId:guid}")]
     public async Task<ActionResult> UpdateService(Guid id, Guid serviceId, [FromBody] UpdateServiceRequest req)
     {
-        var ok = await data.UpdateServiceAsync(id, serviceId, req);
+        var ok = await data.UpdateServiceAsync(id, serviceId, req, User.GetUserId());
         return ok ? NoContent() : NotFound();
     }
 
     [HttpDelete("{id:guid}/services/{serviceId:guid}")]
     public async Task<ActionResult> DeleteService(Guid id, Guid serviceId)
     {
-        var ok = await data.DeleteServiceAsync(id, serviceId);
+        var ok = await data.DeleteServiceAsync(id, serviceId, User.GetUserId());
         return ok ? NoContent() : NotFound();
     }
 
     [HttpPatch("{id:guid}/parts/{partId:guid}")]
     public async Task<ActionResult> UpdatePart(Guid id, Guid partId, [FromBody] UpdatePartRequest req)
     {
-        var ok = await data.UpdatePartAsync(id, partId, req);
-        return ok ? NoContent() : NotFound();
+        try
+        {
+            await data.UpdatePartAsync(id, partId, req, User.GetUserId());
+            return NoContent();
+        }
+        catch (Microsoft.Data.SqlClient.SqlException ex) when (ex.Number >= 50000)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+        catch (Microsoft.Data.SqlClient.SqlException ex)
+        {
+            return StatusCode(500, new { error = ex.Message });
+        }
     }
 
     [HttpDelete("{id:guid}/parts/{partId:guid}")]
     public async Task<ActionResult> DeletePart(Guid id, Guid partId)
     {
-        var ok = await data.DeletePartAsync(id, partId);
-        return ok ? NoContent() : NotFound();
+        try
+        {
+            await data.DeletePartAsync(id, partId, User.GetUserId());
+            return NoContent();
+        }
+        catch (Microsoft.Data.SqlClient.SqlException ex) when (ex.Number >= 50000)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
     }
 
     [HttpPost("{id:guid}/parts/{partId:guid}/return-to-supplier")]
@@ -355,6 +688,14 @@ public class AppController(DataService data) : ControllerBase
     [HttpGet("vehicles")]
     public async Task<ActionResult> GetVehicles()
         => Ok(await data.GetMobileVehiclesAsync());
+
+    [HttpGet("update-info")]
+    [AllowAnonymous]
+    public async Task<ActionResult<AppUpdateInfoDto>> GetUpdateInfo()
+    {
+        var info = await data.GetAppUpdateInfoAsync();
+        return info is null ? NotFound(new { error = "Sürüm bilgisi bulunamadı." }) : Ok(info);
+    }
 }
 
 [ApiController]
@@ -369,20 +710,27 @@ public class StaffController(DataService data) : ControllerBase
     [HttpGet("performance")]
     public async Task<ActionResult> GetPerformance([FromQuery] DateOnly? date, [FromQuery] Guid? userId)
     {
-        var d = date ?? DateOnly.FromDateTime(DateTime.UtcNow);
-        var rows = await data.GetStaffPerformanceAsync(d, User.GetShopRole(), User.GetUserId(), userId);
-        return Ok(rows);
+        try
+        {
+            var d = date ?? DateOnly.FromDateTime(DateTime.UtcNow);
+            var rows = await data.GetStaffPerformanceAsync(d, User.GetShopRole(), User.GetUserId(), userId);
+            return Ok(rows);
+        }
+        catch (PlanFeatureDeniedException ex) { return ex.ToActionResult(); }
     }
 }
 
 [ApiController]
 [Route("api/[controller]")]
 [Authorize]
-public class SuppliersController(DataService data) : ControllerBase
+public class SuppliersController(DataService data, PlanEntitlementsService plans) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult> List([FromQuery] string? search)
-        => Ok(await data.GetSuppliersAsync(search));
+    {
+        try { return Ok(await data.GetSuppliersAsync(search)); }
+        catch (PlanFeatureDeniedException ex) { return ex.ToActionResult(); }
+    }
 
     [HttpPost]
     public async Task<ActionResult<SupplierDto>> Create([FromBody] CreateSupplierRequest req)
@@ -392,6 +740,7 @@ public class SuppliersController(DataService data) : ControllerBase
             var created = await data.CreateSupplierAsync(req, User.GetUserId());
             return created is null ? BadRequest() : Ok(created);
         }
+        catch (PlanFeatureDeniedException ex) { return ex.ToActionResult(); }
         catch (SupplierPhoneConflictException ex)
         {
             return Conflict(new { error = ex.Message });
@@ -399,24 +748,98 @@ public class SuppliersController(DataService data) : ControllerBase
     }
 
     [HttpGet("report")]
-    public async Task<ActionResult> Report([FromQuery] string? period, [FromQuery] DateOnly? date)
+    public async Task<ActionResult> Report(
+        [FromQuery] string? period,
+        [FromQuery] DateOnly? date,
+        [FromQuery] DateOnly? from,
+        [FromQuery] DateOnly? to)
     {
-        var p = period == "weekly" ? "weekly" : "daily";
-        var d = date ?? DateOnly.FromDateTime(DateTime.UtcNow);
-        return Ok(await data.GetSupplierReportAsync(p, d));
+        try
+        {
+            await plans.RequireFeatureAsync("suppliers");
+            if (from.HasValue || to.HasValue)
+            {
+                var f = from ?? to ?? DateOnly.FromDateTime(DateTime.UtcNow);
+                var t = to ?? from ?? f;
+                return Ok(await data.GetSupplierReportAsync(f, t));
+            }
+
+            var p = period == "weekly" ? "weekly" : "daily";
+            var d = date ?? DateOnly.FromDateTime(DateTime.UtcNow);
+            return Ok(await data.GetSupplierReportAsync(p, d));
+        }
+        catch (PlanFeatureDeniedException ex) { return ex.ToActionResult(); }
     }
 
     [HttpGet("{id:guid}")]
     public async Task<ActionResult<SupplierLedgerDto>> Get(Guid id)
     {
-        var ledger = await data.GetSupplierLedgerAsync(id);
-        return ledger is null ? NotFound() : Ok(ledger);
+        try
+        {
+            var ledger = await data.GetSupplierLedgerAsync(id);
+            return ledger is null ? NotFound() : Ok(ledger);
+        }
+        catch (PlanFeatureDeniedException ex) { return ex.ToActionResult(); }
     }
 
     [HttpPost("{id:guid}/payments")]
     public async Task<ActionResult<SupplierLedgerDto>> RecordPayment(Guid id, [FromBody] RecordSupplierPaymentRequest req)
     {
-        var ledger = await data.RecordSupplierPaymentAsync(id, req, User.GetUserId());
-        return ledger is null ? NotFound() : Ok(ledger);
+        try
+        {
+            var ledger = await data.RecordSupplierPaymentAsync(id, req, User.GetUserId());
+            return ledger is null ? NotFound() : Ok(ledger);
+        }
+        catch (PlanFeatureDeniedException ex) { return ex.ToActionResult(); }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+    }
+
+    [HttpPost("{id:guid}/discounts")]
+    public async Task<ActionResult<SupplierLedgerDto>> RecordDiscount(Guid id, [FromBody] RecordSupplierDiscountRequest req)
+    {
+        try
+        {
+            var ledger = await data.RecordSupplierDiscountAsync(id, req, User.GetUserId());
+            return ledger is null ? NotFound() : Ok(ledger);
+        }
+        catch (PlanFeatureDeniedException ex) { return ex.ToActionResult(); }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+    }
+
+    [HttpPut("{id:guid}/transactions/{txId:guid}")]
+    public async Task<ActionResult<SupplierLedgerDto>> UpdateTransaction(
+        Guid id, Guid txId, [FromBody] UpdateSupplierTransactionRequest req)
+    {
+        try
+        {
+            var ledger = await data.UpdateSupplierTransactionAsync(id, txId, req, User.GetUserId());
+            return ledger is null ? NotFound() : Ok(ledger);
+        }
+        catch (PlanFeatureDeniedException ex) { return ex.ToActionResult(); }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
+    }
+
+    [HttpDelete("{id:guid}/transactions/{txId:guid}")]
+    public async Task<ActionResult<SupplierLedgerDto>> DeleteTransaction(Guid id, Guid txId)
+    {
+        try
+        {
+            var ledger = await data.DeleteSupplierTransactionAsync(id, txId, User.GetUserId());
+            return ledger is null ? NotFound() : Ok(ledger);
+        }
+        catch (PlanFeatureDeniedException ex) { return ex.ToActionResult(); }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
     }
 }

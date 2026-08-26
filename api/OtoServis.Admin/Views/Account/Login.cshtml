@@ -17,31 +17,22 @@
 <div class="login-wrap">
     <div class="login-card">
         <h1 class="h4 fw-bold mb-1" style="color:#2f4a86">MobilServisiniz Yönetim</h1>
-        <p class="text-muted small mb-4">Servis kodunuz ile giriş yapın</p>
+        <p class="text-muted small mb-4">Telefon veya kullanıcı adınız ile giriş yapın</p>
 
         <form asp-action="Login" method="post" id="loginForm">
             @Html.AntiForgeryToken()
             <div asp-validation-summary="ModelOnly" class="alert alert-danger py-2 small"></div>
 
             <div class="mb-3">
-                <label asp-for="TenantCode" class="form-label fw-semibold"></label>
-                <input asp-for="TenantCode" class="form-control form-control-lg text-uppercase" id="tenantCode"
-                       placeholder="OTO-IST" autocomplete="organization" />
-                <span asp-validation-for="TenantCode" class="text-danger small"></span>
-                <div id="shopPreview" class="small text-success mt-1 fw-semibold" style="min-height:1.2rem">
-                    @(Model.ShopPreviewName != null ? $"✓ {Model.ShopPreviewName}" : "")
-                </div>
-            </div>
-
-            <div class="mb-3">
-                <label asp-for="Phone" class="form-label fw-semibold"></label>
-                <input asp-for="Phone" class="form-control form-control-lg" placeholder="05551112233" />
-                <span asp-validation-for="Phone" class="text-danger small"></span>
+                <label asp-for="Identifier" class="form-label fw-semibold"></label>
+                <input asp-for="Identifier" class="form-control form-control-lg"
+                       placeholder="05XX XXX XX XX" autocomplete="username" />
+                <span asp-validation-for="Identifier" class="text-danger small"></span>
             </div>
 
             <div class="mb-4">
                 <label asp-for="Password" class="form-label fw-semibold"></label>
-                <input asp-for="Password" class="form-control form-control-lg" />
+                <input asp-for="Password" class="form-control form-control-lg" autocomplete="current-password" />
                 <span asp-validation-for="Password" class="text-danger small"></span>
             </div>
 
@@ -53,9 +44,8 @@
         @if (Env.IsDevelopment())
         {
             <div class="mt-4 p-3 rounded-3 bg-light small text-muted">
-                <div class="fw-bold text-dark mb-1">Demo servis kodları</div>
-                <div><code>OTO-IST</code> İstanbul · <code>OTO-ANK</code> Ankara · <code>OTO-BUR</code> Bursa</div>
-                <div class="mt-1">Telefon: <code>05551112233</code> · Şifre: <code>1234</code></div>
+                <div class="fw-bold text-dark mb-1">Demo giriş</div>
+                <div>Telefon: <code>05551112233</code> · Şifre: <code>1234</code></div>
             </div>
         }
     </div>
@@ -63,28 +53,5 @@
 <script src="~/lib/jquery/dist/jquery.min.js"></script>
 <script src="~/lib/jquery-validation/dist/jquery.validate.min.js"></script>
 <script src="~/lib/jquery-validation-unobtrusive/jquery.validate.unobtrusive.min.js"></script>
-<script>
-(function () {
-    const input = document.getElementById('tenantCode');
-    const preview = document.getElementById('shopPreview');
-    let timer;
-    input.addEventListener('input', function () {
-        clearTimeout(timer);
-        const code = input.value.trim();
-        if (code.length < 3) { preview.textContent = ''; return; }
-        timer = setTimeout(async () => {
-            try {
-                const res = await fetch('/Account/LookupTenant?code=' + encodeURIComponent(code));
-                if (res.ok) {
-                    const data = await res.json();
-                    preview.textContent = '✓ ' + data.shopName + (data.city ? ' · ' + data.city : '');
-                } else {
-                    preview.textContent = '';
-                }
-            } catch { preview.textContent = ''; }
-        }, 400);
-    });
-})();
-</script>
 </body>
 </html>

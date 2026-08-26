@@ -1,0 +1,53 @@
+﻿@{
+    var controller = ViewContext.RouteData.Values["controller"]?.ToString() ?? "";
+}
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>@ViewData["Title"] - MobilServisiniz Platform</title>
+    <link rel="stylesheet" href="~/lib/bootstrap/dist/css/bootstrap.min.css" />
+    <link rel="stylesheet" href="~/css/admin.css" asp-append-version="true" />
+</head>
+<body>
+<div class="admin-shell">
+    @if (User.Identity?.IsAuthenticated == true)
+    {
+        <aside class="admin-sidebar">
+            <div class="brand">Platform Yönetim</div>
+            <div class="shop-name">Tüm servisler</div>
+            <nav class="admin-nav py-2">
+                <a class="@(controller == "Shops" ? "active" : "")" asp-controller="Shops" asp-action="Index">Servisler</a>
+                <a class="@(controller == "Shops" && ViewContext.RouteData.Values["action"]?.ToString() == "Create" ? "active" : "")"
+                   asp-controller="Shops" asp-action="Create">Yeni Servis</a>
+                <a class="@(controller == "AppRelease" ? "active" : "")" asp-controller="AppRelease" asp-action="Index">Uygulama Sürümü</a>
+            </nav>
+        </aside>
+    }
+
+    <div class="admin-main">
+        @if (User.Identity?.IsAuthenticated == true)
+        {
+            <header class="admin-topbar">
+                <div class="fw-bold text-secondary">@ViewData["Title"]</div>
+                <div class="d-flex align-items-center gap-3">
+                    <span class="text-muted small">@User.Identity?.Name</span>
+                    <form asp-controller="Account" asp-action="Logout" method="post" class="m-0">
+                        @Html.AntiForgeryToken()
+                        <button type="submit" class="btn btn-sm btn-outline-secondary">Çıkış</button>
+                    </form>
+                </div>
+            </header>
+        }
+
+        <main class="admin-content">
+            @RenderBody()
+        </main>
+    </div>
+</div>
+<script src="~/lib/jquery/dist/jquery.min.js"></script>
+<script src="~/lib/bootstrap/dist/js/bootstrap.bundle.min.js"></script>
+@await RenderSectionAsync("Scripts", required: false)
+</body>
+</html>

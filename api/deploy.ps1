@@ -1,6 +1,6 @@
 # OtoServis — Publish ve sunucuya deploy
 # Sunucu: 37.148.211.243
-# API: 5280 | Admin: 5281
+# API: 5280 | Admin: 5281 | Platform: 5282
 
 param(
     [switch]$DeployOnly,
@@ -12,9 +12,13 @@ $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $PublishRoot = Join-Path (Split-Path -Parent $Root) "publish"
 $Server = "37.148.211.243"
 $ServerUser = "administrator"
-$ServerPass = "Dl0#Zz1!Fc2!Mm2#"
+# Gercek sunucu parolasi kaynak kodda tutulmaz: calistirmadan once
+#   $env:OTOSERVIS_SERVER_PASS = "..."
+# olarak ayarlayin (veya PowerShell profilinizde tanimlayin).
+$ServerPass = $env:OTOSERVIS_SERVER_PASS
 $RemoteApiPath = "C:\OtoServis\api"
 $RemoteAdminPath = "C:\OtoServis\admin"
+$RemotePlatformPath = "C:\OtoServis\platform"
 
 function Publish-Project {
     param([string]$ProjectPath, [string]$Profile)
@@ -26,13 +30,26 @@ function Publish-Project {
 if (-not $DeployOnly) {
     Publish-Project "$Root\OtoServis.Api\OtoServis.Api.csproj" "Production"
     Publish-Project "$Root\OtoServis.Admin\OtoServis.Admin.csproj" "Production"
+    Publish-Project "$Root\OtoServis.Platform\OtoServis.Platform.csproj" "Production"
 
     Copy-Item "$Root\publish-templates\start-api.bat" "$PublishRoot\api\" -Force
     Copy-Item "$Root\publish-templates\start-admin.bat" "$PublishRoot\admin\" -Force
+    Copy-Item "$Root\publish-templates\start-platform.bat" "$PublishRoot\platform\" -Force
+
+    foreach ($pair in @(
+        @{ Src = "$PublishRoot\api"; Zip = "$PublishRoot\OtoServis-Api.zip" },
+        @{ Src = "$PublishRoot\admin"; Zip = "$PublishRoot\OtoServis-Admin.zip" },
+        @{ Src = "$PublishRoot\platform"; Zip = "$PublishRoot\OtoServis-Platform.zip" }
+    )) {
+        if (Test-Path $pair.Zip) { Remove-Item $pair.Zip -Force }
+        Compress-Archive -Path "$($pair.Src)\*" -DestinationPath $pair.Zip -Force
+    }
 
     Write-Host "`nPublish tamamlandi:" -ForegroundColor Green
-    Write-Host "  API:   $PublishRoot\api"
-    Write-Host "  Admin: $PublishRoot\admin"
+    Write-Host "  API:      $PublishRoot\api"
+    Write-Host "  Admin:    $PublishRoot\admin"
+    Write-Host "  Platform: $PublishRoot\platform"
+    Write-Host "  Zips: OtoServis-Api.zip, OtoServis-Admin.zip, OtoServis-Platform.zip"
 }
 
 if ($SkipDeploy) { exit 0 }
@@ -40,8 +57,10 @@ if ($SkipDeploy) { exit 0 }
 # --- Sunucuya kopyala (WinRM veya admin paylasimi) ---
 $ApiSource = "$PublishRoot\api"
 $AdminSource = "$PublishRoot\admin"
+$PlatformSource = "$PublishRoot\platform"
 
 if (-not (Test-Path $ApiSource)) { throw "API publish klasoru yok. Once publish calistirin." }
+if (-not $ServerPass) { throw "OTOSERVIS_SERVER_PASS ortam degiskeni tanimli degil. Once: `$env:OTOSERVIS_SERVER_PASS = '...'" }
 
 Write-Host "`n>> Sunucuya deploy: $Server" -ForegroundColor Cyan
 
@@ -51,18 +70,20 @@ $cred = New-Object System.Management.Automation.PSCredential($ServerUser, $secPa
 $deployScript = @"
 `$apiPath = '$RemoteApiPath'
 `$adminPath = '$RemoteAdminPath'
-New-Item -ItemType Directory -Force -Path `$apiPath, `$adminPath | Out-Null
+`$platformPath = '$RemotePlatformPath'
+New-Item -ItemType Directory -Force -Path `$apiPath, `$adminPath, `$platformPath | Out-Null
 
-# Eski surecleri durdur
-Get-Process -Name 'dotnet','OtoServis.Api' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+Get-Process -Name 'dotnet','OtoServis.Api','OtoServis.Admin','OtoServis.Platform' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 Start-Sleep -Seconds 2
 
-# Firewall kurallari (yoksa ekle)
 if (-not (Get-NetFirewallRule -DisplayName 'OtoServis API 5280' -ErrorAction SilentlyContinue)) {
     New-NetFirewallRule -DisplayName 'OtoServis API 5280' -Direction Inbound -Protocol TCP -LocalPort 5280 -Action Allow | Out-Null
 }
 if (-not (Get-NetFirewallRule -DisplayName 'OtoServis Admin 5281' -ErrorAction SilentlyContinue)) {
     New-NetFirewallRule -DisplayName 'OtoServis Admin 5281' -Direction Inbound -Protocol TCP -LocalPort 5281 -Action Allow | Out-Null
+}
+if (-not (Get-NetFirewallRule -DisplayName 'OtoServis Platform 5282' -ErrorAction SilentlyContinue)) {
+    New-NetFirewallRule -DisplayName 'OtoServis Platform 5282' -Direction Inbound -Protocol TCP -LocalPort 5282 -Action Allow | Out-Null
 }
 
 Write-Host 'Deploy klasorleri hazir.'
@@ -72,60 +93,60 @@ try {
     Invoke-Command -ComputerName $Server -Credential $cred -ScriptBlock ([scriptblock]::Create($deployScript)) -ErrorAction Stop
     Write-Host "WinRM baglantisi OK" -ForegroundColor Green
 
-    # Dosyalari zip ile gonder
     $apiZip = "$env:TEMP\otoservis-api.zip"
     $adminZip = "$env:TEMP\otoservis-admin.zip"
-    if (Test-Path $apiZip) { Remove-Item $apiZip -Force }
-    if (Test-Path $adminZip) { Remove-Item $adminZip -Force }
+    $platformZip = "$env:TEMP\otoservis-platform.zip"
+    foreach ($z in @($apiZip, $adminZip, $platformZip)) { if (Test-Path $z) { Remove-Item $z -Force } }
     Compress-Archive -Path "$ApiSource\*" -DestinationPath $apiZip -Force
     Compress-Archive -Path "$AdminSource\*" -DestinationPath $adminZip -Force
+    Compress-Archive -Path "$PlatformSource\*" -DestinationPath $platformZip -Force
 
     Copy-Item $apiZip -Destination "\\$Server\C$\OtoServis\otoservis-api.zip" -Force
     Copy-Item $adminZip -Destination "\\$Server\C$\OtoServis\otoservis-admin.zip" -Force
+    Copy-Item $platformZip -Destination "\\$Server\C$\OtoServis\otoservis-platform.zip" -Force
 
     $startScript = @"
 Expand-Archive -Path 'C:\OtoServis\otoservis-api.zip' -DestinationPath '$RemoteApiPath' -Force
 Expand-Archive -Path 'C:\OtoServis\otoservis-admin.zip' -DestinationPath '$RemoteAdminPath' -Force
+Expand-Archive -Path 'C:\OtoServis\otoservis-platform.zip' -DestinationPath '$RemotePlatformPath' -Force
 
 `$env:ASPNETCORE_ENVIRONMENT = 'Production'
 
 Start-Process -FilePath 'dotnet' -ArgumentList '$RemoteApiPath\OtoServis.Api.dll' -WorkingDirectory '$RemoteApiPath' -WindowStyle Hidden
-Start-Sleep -Seconds 3
+Start-Sleep -Seconds 2
 Start-Process -FilePath 'dotnet' -ArgumentList '$RemoteAdminPath\OtoServis.Admin.dll' -WorkingDirectory '$RemoteAdminPath' -WindowStyle Hidden
+Start-Sleep -Seconds 2
+Start-Process -FilePath 'dotnet' -ArgumentList '$RemotePlatformPath\OtoServis.Platform.dll' -WorkingDirectory '$RemotePlatformPath' -WindowStyle Hidden
 
-Write-Host 'API ve Admin baslatildi.'
+Write-Host 'API, Admin ve Platform baslatildi.'
 "@
 
     Invoke-Command -ComputerName $Server -Credential $cred -ScriptBlock ([scriptblock]::Create($startScript))
     Write-Host "`nDeploy basarili!" -ForegroundColor Green
-    Write-Host "  API:   http://${Server}:5280/swagger"
-    Write-Host "  Admin: http://${Server}:5281"
+    Write-Host "  API:      http://${Server}:5280/swagger"
+    Write-Host "  Admin:    http://${Server}:5281"
+    Write-Host "  Platform: http://${Server}:5282"
 }
 catch {
     Write-Host "`nOtomatik deploy basarisiz: $($_.Exception.Message)" -ForegroundColor Yellow
     Write-Host @"
 
 Manuel deploy adimlari:
-1. publish\api ve publish\admin klasorlerini sunucuya kopyalayin:
+1. publish\api, publish\admin, publish\platform klasorlerini sunucuya kopyalayin:
    C:\OtoServis\api
    C:\OtoServis\admin
+   C:\OtoServis\platform
 
-2. Sunucuda .NET 8 Runtime yuklu olmali:
-   https://dotnet.microsoft.com/download/dotnet/8.0
+2. Sunucuda .NET 8 Runtime yuklu olmali
 
-3. Firewall'da 5280 ve 5281 portlarini acin
+3. Firewall'da 5280, 5281, 5282 portlarini acin
 
 4. Baslatma:
-   cd C:\OtoServis\api
-   set ASPNETCORE_ENVIRONMENT=Production
-   dotnet OtoServis.Api.dll
-
-   cd C:\OtoServis\admin
-   set ASPNETCORE_ENVIRONMENT=Production
-   dotnet OtoServis.Admin.dll
+   start-api.bat / start-admin.bat / start-platform.bat
 
 5. Test:
-   http://${Server}:5280/api/auth/lookup-tenant?code=OTO-IST
+   http://${Server}:5280/swagger
    http://${Server}:5281
+   http://${Server}:5282
 "@ -ForegroundColor Gray
 }

@@ -16,17 +16,10 @@ public class AccountController(AuthService auth) : Controller
         if (User.Identity?.IsAuthenticated == true && User.GetShopId().HasValue)
             return RedirectToAction("Index", "Dashboard");
         ViewData["ReturnUrl"] = returnUrl;
+        if (string.Equals(HttpContext.Request.Query["expired"], "1", StringComparison.Ordinal))
+            ModelState.AddModelError(string.Empty,
+                "Servis lisans süreniz dolmuştur. Yenileme için lütfen iletişime geçin.");
         return View(new LoginViewModel());
-    }
-
-    [AllowAnonymous]
-    [HttpGet]
-    public async Task<IActionResult> LookupTenant(string code)
-    {
-        if (string.IsNullOrWhiteSpace(code))
-            return BadRequest(new { error = "Servis kodu gerekli." });
-        var shop = await auth.LookupTenantAsync(code);
-        return shop is null ? NotFound(new { error = "Servis bulunamadı." }) : Ok(shop);
     }
 
     [AllowAnonymous]
@@ -36,23 +29,23 @@ public class AccountController(AuthService auth) : Controller
     {
         if (!ModelState.IsValid) return View(model);
 
-        var preview = await auth.LookupTenantAsync(model.TenantCode);
-        if (preview is null)
+        try
         {
-            ModelState.AddModelError(nameof(model.TenantCode), "Servis kodu geçersiz.");
+            var result = await auth.ValidateAsync(model.Identifier, model.Password);
+            if (result is null)
+            {
+                ModelState.AddModelError(string.Empty, "Telefon/kullanıcı adı veya şifre hatalı.");
+                return View(model);
+            }
+
+            var (userId, fullName, shop) = result.Value;
+            return await SignInShopAsync(userId, fullName, shop, returnUrl);
+        }
+        catch (ShopLicenseExpiredException ex)
+        {
+            ModelState.AddModelError(string.Empty, ex.Message);
             return View(model);
         }
-        model.ShopPreviewName = preview.ShopName;
-
-        var result = await auth.ValidateAsync(model.TenantCode, model.Phone, model.Password);
-        if (result is null)
-        {
-            ModelState.AddModelError(string.Empty, "Telefon, şifre veya servis yetkisi hatalı.");
-            return View(model);
-        }
-
-        var (userId, fullName, shop) = result.Value;
-        return await SignInShopAsync(userId, fullName, shop, returnUrl);
     }
 
     [Authorize]

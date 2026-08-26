@@ -70,6 +70,33 @@ Diğer tüm endpoint'ler `Authorization: Bearer {token}` gerektirir ve token'da 
 | POST | `/api/workorders/{id}/complaints` | Şikayet ekle |
 | POST | `/api/workorders/{id}/services` | İşçilik ekle |
 | POST | `/api/workorders/{id}/parts` | Parça ekle (stok düşer) |
+| POST | `/api/ai/scan-ruhsat` | Ruhsat fotoğrafı okuma (AI failover) |
+
+## Yapay zekâ (ruhsat okuma)
+
+`POST /api/ai/scan-ruhsat` — body: `{ "imageBase64": "...", "mimeType": "image/jpeg" }`
+
+Zincir (ücretsiz öncelik): `gemini-3.5-flash-lite` → `gemini-3.5-flash` → `gpt-4o-mini` → `ocr/tesseract`.
+
+`appsettings.json` / Production:
+
+```json
+"Ai": {
+  "GeminiApiKey": "...",
+  "OpenAiApiKey": "...",
+  "Providers": [
+    { "Name": "gemini", "Model": "gemini-3.5-flash-lite" },
+    { "Name": "gemini", "Model": "gemini-3.5-flash" },
+    { "Name": "openai", "Model": "gpt-4o-mini" },
+    { "Name": "ocr", "Model": "tesseract" }
+  ]
+}
+```
+
+Anahtar alma:
+
+- Gemini (ücretsiz): https://aistudio.google.com/app/apikey
+- OpenAI (yedek): https://platform.openai.com/api-keys
 
 ## Mobil uygulama entegrasyonu
 

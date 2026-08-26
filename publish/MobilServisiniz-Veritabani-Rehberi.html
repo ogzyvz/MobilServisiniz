@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8" />
+  <title>MobilServisiniz — Veritabanı Tablo Rehberi</title>
+  <style>
+    @page { size: A4; margin: 14mm 12mm; }
+    * { box-sizing: border-box; }
+    body {
+      font-family: "Segoe UI", Tahoma, Arial, sans-serif;
+      color: #1a1f2e;
+      font-size: 9.5pt;
+      line-height: 1.4;
+      margin: 0;
+    }
+    h1 { font-size: 18pt; margin: 0 0 6px; color: #2f4a86; }
+    h2 {
+      font-size: 12.5pt; margin: 18px 0 8px; padding-bottom: 3px;
+      border-bottom: 2px solid #2f4a86; color: #2f4a86; page-break-after: avoid;
+    }
+    h3 {
+      font-size: 10.5pt; margin: 12px 0 4px; color: #1f7a8c; page-break-after: avoid;
+    }
+    p { margin: 0 0 6px; }
+    .hero {
+      background: linear-gradient(135deg, #2f4a86, #1f7a8c);
+      color: #fff; padding: 16px 18px; border-radius: 10px; margin-bottom: 14px;
+    }
+    .hero h1 { color: #fff; }
+    .hero p { margin: 0; opacity: 0.92; font-size: 9.5pt; }
+    .box {
+      background: #f4f6fa; border: 1px solid #dde0e7; border-radius: 8px;
+      padding: 8px 10px; margin: 8px 0 12px; font-size: 9pt;
+    }
+    table {
+      width: 100%; border-collapse: collapse; margin: 4px 0 12px;
+      font-size: 8.5pt; page-break-inside: auto;
+    }
+    tr { page-break-inside: avoid; }
+    th, td {
+      border: 1px solid #dde0e7; padding: 4px 6px; text-align: left; vertical-align: top;
+    }
+    th { background: #eef2f9; color: #2f4a86; font-weight: 700; }
+    td.col { font-family: Consolas, "Courier New", monospace; white-space: nowrap; width: 28%; }
+    .screen { color: #6c7288; font-size: 8pt; }
+    .footer {
+      margin-top: 16px; padding-top: 8px; border-top: 1px solid #dde0e7;
+      font-size: 8pt; color: #6c7288;
+    }
+    code { font-family: Consolas, "Courier New", monospace; font-size: 8.5pt; }
+    ul { margin: 4px 0 10px; padding-left: 16px; }
+    li { margin-bottom: 2px; }
+  </style>
+</head>
+<body>
+
+<div class="hero">
+  <h1>MobilServisiniz — Veritabanı Rehberi</h1>
+  <p>Veritabanı: <strong>OtoServis</strong> · Hangi tabloda hangi bilgi tutulur (detaylı)</p>
+  <p style="margin-top:6px;opacity:.85">Temmuz 2026 · Şema + migrasyonlar (05–14) dahil</p>
+</div>
+
+<div class="box">
+  <strong>Not:</strong> Çoğu tablo <code>shop_id</code> ile servise (tenant) bağlıdır.
+  Canlıda müşteri ve tedarikçi tek tabloda birleşti: <code>dbo.customers</code>
+  (<code>is_customer</code> / <code>is_supplier</code>). Eski <code>suppliers</code> genelde
+  <code>suppliers_deprecated</code> olarak durur.
+</div>
+
+<h2>1. Servis ve kullanıcılar</h2>
+
+<h3>dbo.shops — Oto servis / dükkan</h3>
+<p class="screen">Ekran: Giriş (servis kodu), IBAN Ekle/Düzenle, genel ayarlar</p>
+<table>
+  <tr><th>Kolon</th><th>Anlamı</th></tr>
+  <tr><td class="col">id</td><td>Servis kimliği (GUID)</td></tr>
+  <tr><td class="col">tenant_code</td><td>Girişteki servis kodu (örn. OTO-IST)</td></tr>
+  <tr><td class="col">slug / name / legal_name</td><td>Kısa ad, görünen ad, resmi ünvan</td></tr>
+  <tr><td class="col">tax_no / tax_office</td><td>Vergi no / vergi dairesi</td></tr>
+  <tr><td class="col">phone / email / address / city</td><td>İletişim ve adres</td></tr>
+  <tr><td class="col">bank_iban / bank_name / account_holder</td><td>Havale IBAN bilgileri (IBAN Paylaş)</td></tr>
+  <tr><td class="col">default_vat_rate / currency / timezone</td><td>KDV, para birimi, saat dilimi</td></tr>
+  <tr><td class="col">is_active</td><td>Aktif mi?</td></tr>
+</table>
+
+<h3>dbo.users — Kullanıcı hesabı</h3>
+<p class="screen">Ekran: Giriş, personel listesi</p>
+<table>
+  <tr><th>Kolon</th><th>Anlamı</th></tr>
+  <tr><td class="col">id, full_name, phone</td><td>Kimlik; telefon benzersiz</td></tr>
+  <tr><td class="col">password_hash</td><td>Şifre hash</td></tr>
+  <tr><td class="col">session_id</td><td>Tek cihaz oturumu (başka telefonda giriş eskiyi düşürür)</td></tr>
+  <tr><td class="col">default_shop_id / last_login_at</td><td>Varsayılan servis, son giriş</td></tr>
+</table>
+
+<h3>dbo.shop_users — Kullanıcı ↔ servis üyeliği</h3>
+<table>
+  <tr><th>Kolon</th><th>Anlamı</th></tr>
+  <tr><td class="col">shop_id, user_id</td><td>Hangi kullanıcı hangi serviste</td></tr>
+  <tr><td class="col">role</td><td>admin / usta / personel</td></tr>
+  <tr><td class="col">title / is_owner / is_active</td><td>Ünvan, sahip mi, aktif mi</td></tr>
+</table>
+
+<h3>dbo.tenant_counters</h3>
+<p>İş emri numarası vb. servis bazlı sayaçlar (<code>counter_name</code>, <code>last_value</code>).</p>
+
+<h2>2. Cari (müşteri / tedarikçi)</h2>
+
+<h3>dbo.customers — Tek cari tablosu</h3>
+<p class="screen">Ekran: Müşteri listesi, Yeni Cari, tedarikçi seçimi</p>
+<table>
+  <tr><th>Kolon</th><th>Anlamı</th></tr>
+  <tr><td class="col">id, shop_id</td><td>Cari kimliği</td></tr>
+  <tr><td class="col">full_name / company_name</td><td>Ad / firma</td></tr>
+  <tr><td class="col">phone / email / address</td><td>İletişim</td></tr>
+  <tr><td class="col">tax_no / tc_no</td><td>Vergi / TC</td></tr>
+  <tr><td class="col">is_customer</td><td>1 = müşteri olarak kullanılır</td></tr>
+  <tr><td class="col">is_supplier</td><td>1 = tedarikçi olarak kullanılır (her ikisi birden olabilir)</td></tr>
+  <tr><td class="col">opening_balance</td><td>Açılış bakiyesi (tedarikçi cari)</td></tr>
+  <tr><td class="col">contact_person</td><td>Yetkili kişi</td></tr>
+</table>
+
+<h3>dbo.supplier_transactions — Tedarikçi hareketleri</h3>
+<p class="screen">Ekran: Tedarikçi detay → Hareketler (Alış / Ödeme / İade)</p>
+<table>
+  <tr><th>Kolon</th><th>Anlamı</th></tr>
+  <tr><td class="col">supplier_id</td><td>Tedarikçi (= customers.id, is_supplier=1)</td></tr>
+  <tr><td class="col">type</td><td><code>alis</code> | <code>odeme</code> | <code>iade</code></td></tr>
+  <tr><td class="col">amount</td><td>Tutar (₺)</td></tr>
+  <tr><td class="col">description</td><td>Açıklama (örn. “İş emri için dışarıdan alım: …”)</td></tr>
+  <tr><td class="col">work_order_part_id</td><td>İlgili iş emri parçası (varsa)</td></tr>
+  <tr><td class="col">created_at / created_by</td><td>Ne zaman / kim</td></tr>
+</table>
+
+<h3>dbo.vw_SupplierBalance (görünüm)</h3>
+<p>Tedarikçi güncel bakiye: açılış + alış − ödeme − iade.</p>
+
+<h2>3. Araçlar</h2>
+
+<h3>dbo.vehicles</h3>
+<p class="screen">Ekran: Yeni araç kaydı, Bilgiler sekmesi, araç listesi</p>
+<table>
+  <tr><th>Kolon</th><th>Anlamı</th></tr>
+  <tr><td class="col">customer_id</td><td>Araç sahibi müşteri</td></tr>
+  <tr><td class="col">plate / plate_norm</td><td>Plaka (normalize benzersiz)</td></tr>
+  <tr><td class="col">brand / model / model_year / color</td><td>Marka, model, yıl, renk</td></tr>
+  <tr><td class="col">fuel</td><td>Yakıt tipi (ref_fuel_types)</td></tr>
+  <tr><td class="col">chassis_no / engine_no / engine_volume</td><td>Şasi, motor no, hacim</td></tr>
+  <tr><td class="col">mileage</td><td>Kilometre</td></tr>
+</table>
+
+<h2>4. İş emri ve içerikleri</h2>
+
+<h3>dbo.work_orders — İş emri</h3>
+<p class="screen">Ekran: Araç detay, durum chip’leri, zaman çizelgesi</p>
+<table>
+  <tr><th>Kolon</th><th>Anlamı</th></tr>
+  <tr><td class="col">order_no</td><td>Servis içi sıra no</td></tr>
+  <tr><td class="col">vehicle_id / customer_id</td><td>Araç ve müşteri</td></tr>
+  <tr><td class="col">status</td><td>bekliyor, islemde, tamamlandi, odeme_tamamlandi, teslim_edildi…</td></tr>
+  <tr><td class="col">assigned_user_id / assigned_user_name</td><td>İşi yapan personel</td></tr>
+  <tr><td class="col">mileage_in / mileage_out</td><td>Giriş / çıkış km</td></tr>
+  <tr><td class="col">discount_amount</td><td>İndirim</td></tr>
+  <tr><td class="col">opened_at / started_at / closed_at / delivered_at</td><td>Zaman damgaları</td></tr>
+  <tr><td class="col">notes / internal_notes</td><td>Notlar</td></tr>
+</table>
+
+<h3>dbo.work_order_status_history</h3>
+<p>Durum değişim geçmişi: <code>old_status</code>, <code>new_status</code>, <code>changed_by</code>, <code>changed_at</code>.</p>
+
+<h3>dbo.complaints — Şikayetler</h3>
+<table>
+  <tr><th>Kolon</th><th>Anlamı</th></tr>
+  <tr><td class="col">work_order_id</td><td>İş emri</td></tr>
+  <tr><td class="col">description</td><td>Şikayet metni</td></tr>
+  <tr><td class="col">is_resolved</td><td>Çözüldü mü</td></tr>
+</table>
+
+<h3>dbo.services — Yapılan işlemler (işçilik)</h3>
+<table>
+  <tr><th>Kolon</th><th>Anlamı</th></tr>
+  <tr><td class="col">title</td><td>İşlem adı (yağ değişimi vb.)</td></tr>
+  <tr><td class="col">price</td><td>İşçilik ücreti (müşteriye)</td></tr>
+  <tr><td class="col">service_catalog_id</td><td>Katalogdan seçildiyse</td></tr>
+  <tr><td class="col">performed_by</td><td>Yapan kullanıcı</td></tr>
+</table>
+
+<h3>dbo.work_order_parts — İş emri ürünleri</h3>
+<p class="screen">Ekran: Ürünler sekmesi (stoktan / dışarıdan)</p>
+<table>
+  <tr><th>Kolon</th><th>Anlamı</th></tr>
+  <tr><td class="col">name / quantity</td><td>Parça adı, adet</td></tr>
+  <tr><td class="col">unit_price</td><td><strong>Satış</strong> birim fiyatı (müşteriye)</td></tr>
+  <tr><td class="col">purchase_price</td><td><strong>Alış</strong> fiyatı (dışarıdan alımda)</td></tr>
+  <tr><td class="col">source</td><td><code>stok</code> | <code>disaridan</code></td></tr>
+  <tr><td class="col">stock_product_id</td><td>Stoktan düşüldüyse stok kartı</td></tr>
+  <tr><td class="col">supplier_id</td><td>Dışarıdan alındıysa tedarikçi</td></tr>
+  <tr><td class="col">returned_at</td><td>Tedarikçiye iade tarihi (doluysa iade edilmiş)</td></tr>
+</table>
+
+<h3>dbo.work_order_images — Fotoğraflar</h3>
+<table>
+  <tr><th>Kolon</th><th>Anlamı</th></tr>
+  <tr><td class="col">image_type</td><td>ruhsat | arac | hasar | diger</td></tr>
+  <tr><td class="col">file_path / mime_type</td><td>Dosya yolu</td></tr>
+  <tr><td class="col">ai_scanned / ai_result_json</td><td>Ruhsat AI okuma sonucu</td></tr>
+  <tr><td class="col">complaint_id / service_id</td><td>İlgili şikayet/işlem (bağlantı varsa)</td></tr>
+</table>
+
+<h3>dbo.vw_WorkOrderTotals (görünüm)</h3>
+<p><code>labor_total</code>, <code>parts_total</code>, <code>grand_total</code>, <code>paid_total</code> — ekrandaki toplam / ödenen / kalan.</p>
+
+<h2>5. Ödemeler (müşteri → servis)</h2>
+
+<h3>dbo.payments</h3>
+<p class="screen">Ekran: Ödeme Al; ana sayfa “Bugün tahsilat”</p>
+<table>
+  <tr><th>Kolon</th><th>Anlamı</th></tr>
+  <tr><td class="col">work_order_id</td><td>Hangi iş emri</td></tr>
+  <tr><td class="col">amount</td><td>Alınan tutar</td></tr>
+  <tr><td class="col">method</td><td>nakit | kart | havale | diger</td></tr>
+  <tr><td class="col">paid_at / received_by</td><td>Tarih / alan kişi</td></tr>
+  <tr><td class="col">reference_no</td><td>Referans (opsiyonel)</td></tr>
+</table>
+<p><strong>Not:</strong> “Ödeme Tamamlandı” bir <code>payments</code> satırı değil; <code>work_orders.status = odeme_tamamlandi</code> durumudur.</p>
+
+<h2>6. Stok</h2>
+
+<h3>dbo.stock_products</h3>
+<p class="screen">Ekran: Stok listesi, Ürün Ekle, Dışarıdan Temin</p>
+<table>
+  <tr><th>Kolon</th><th>Anlamı</th></tr>
+  <tr><td class="col">name / code / barcode</td><td>Ad, stok kodu, barkod</td></tr>
+  <tr><td class="col">category</td><td>yag, filtre, fren, lastik, elektrik, diger</td></tr>
+  <tr><td class="col">purchase_price</td><td>Alış fiyatı</td></tr>
+  <tr><td class="col">price</td><td>Satış fiyatı</td></tr>
+  <tr><td class="col">quantity / min_quantity</td><td>Stok adedi / minimum uyarı</td></tr>
+  <tr><td class="col">unit / location</td><td>Birim, raf/konum</td></tr>
+</table>
+
+<h3>dbo.stock_movements</h3>
+<table>
+  <tr><th>Kolon</th><th>Anlamı</th></tr>
+  <tr><td class="col">stock_product_id</td><td>Hangi ürün</td></tr>
+  <tr><td class="col">change_qty</td><td>+ giriş / − çıkış</td></tr>
+  <tr><td class="col">movement_type</td><td>giris | cikis | sayim | iade</td></tr>
+  <tr><td class="col">reason / work_order_id</td><td>Açıklama / ilgili iş emri</td></tr>
+</table>
+
+<h3>dbo.service_catalog</h3>
+<p>Hazır işlem kataloğu: <code>name</code>, <code>category</code>, <code>default_price</code>, <code>estimated_minutes</code>.</p>
+
+<h2>7. Referans (ref_*) tabloları</h2>
+<ul>
+  <li><code>ref_work_order_status</code> — İş durumu kodları ve etiketleri</li>
+  <li><code>ref_payment_methods</code> — nakit, kart, havale…</li>
+  <li><code>ref_fuel_types</code> — Yakıt</li>
+  <li><code>ref_stock_categories</code> — Stok kategorileri</li>
+  <li><code>ref_service_categories</code> — İşlem kategorileri</li>
+  <li><code>ref_user_roles</code> — Roller</li>
+  <li><code>ref_customer_types</code> — bireysel / kurumsal vb.</li>
+  <li><code>ref_appointment_status</code> — Randevu durumu</li>
+</ul>
+
+<h2>8. Diğer</h2>
+<table>
+  <tr><th>Tablo</th><th>Ne tutar</th></tr>
+  <tr><td class="col">appointments</td><td>Randevular (tarih, müşteri, araç, durum)</td></tr>
+  <tr><td class="col">invoices</td><td>Fatura başlığı (no, KDV, toplam) — şema hazır</td></tr>
+  <tr><td class="col">audit_log</td><td>Sistem işlem logu</td></tr>
+  <tr><td class="col">vehicle_brands / models</td><td>Marka-model referansı</td></tr>
+  <tr><td class="col">vw_ShopDashboard</td><td>Ana sayfa sayaçları (bekleyen, işlemde…)</td></tr>
+</table>
+
+<h2>9. Ekran → tablo hızlı eşleme</h2>
+<table>
+  <tr><th>Uygulama ekranı / aksiyon</th><th>Ana tablolar</th></tr>
+  <tr><td>Giriş</td><td>shops, users, shop_users</td></tr>
+  <tr><td>IBAN Ekle</td><td>shops (bank_*)</td></tr>
+  <tr><td>Yeni araç / ruhsat</td><td>vehicles, customers, work_orders, complaints, work_order_images</td></tr>
+  <tr><td>İşleme Al / Tamamla / Teslim</td><td>work_orders, work_order_status_history</td></tr>
+  <tr><td>İşlem ekle</td><td>services (+ service_catalog)</td></tr>
+  <tr><td>Ürün stoktan</td><td>work_order_parts, stock_products, stock_movements</td></tr>
+  <tr><td>Ürün dışarıdan / PDF</td><td>work_order_parts, supplier_transactions, customers</td></tr>
+  <tr><td>Ödeme Al</td><td>payments</td></tr>
+  <tr><td>Ödeme Tamamlandı</td><td>work_orders.status</td></tr>
+  <tr><td>Tedarikçi hareketleri</td><td>supplier_transactions</td></tr>
+  <tr><td>Stok / Dışarıdan Temin</td><td>stock_products, stock_movements, supplier_transactions</td></tr>
+  <tr><td>Bugün tahsilat / ödeme bekleyen</td><td>payments + vw_WorkOrderTotals + work_orders</td></tr>
+</table>
+
+<div class="footer">
+  MobilServisiniz Veritabanı Rehberi · OtoServis DB · Bu belge teknik / operasyon referansıdır.
+</div>
+
+</body>
+</html>

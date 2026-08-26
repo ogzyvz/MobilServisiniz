@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
@@ -12,12 +12,12 @@ import {
   TextInput,
   View,
 } from 'react-native'
-import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import * as ImagePicker from 'expo-image-picker'
+import * as DocumentPicker from 'expo-document-picker'
+import { readAsStringAsync, EncodingType } from 'expo-file-system/legacy'
 import * as Print from 'expo-print'
 import * as Sharing from 'expo-sharing'
 import {
-  ArrowLeft,
   Phone,
   MapPin,
   Plus,
@@ -41,29 +41,55 @@ import {
   ImagePlus,
   PlayCircle,
   CalendarPlus,
+  FileText,
+  MessageCircle,
+  Banknote,
+  Landmark,
 } from 'lucide-react-native'
 import { cn } from '@/lib/utils'
 import {
   STATUS_LABELS,
+  COMPLAINT_CATEGORY_LABELS,
+  COMPLAINT_CATEGORY_ORDER,
+  type Complaint,
+  type ComplaintCategory,
   type JobStatus,
   type ProductItem,
   type ServiceItem,
   type Supplier,
   type Vehicle,
 } from '@/lib/types'
-import { TextField, TextArea } from '@/components/form-field'
-import { formatCurrency, formatDate, formatTime } from '@/lib/format'
+import { TextField, TextArea, SelectField } from '@/components/form-field'
+import { AppSheet, SheetActionList, SheetCancelButton } from '@/components/app-modal'
+import { KeyboardAwareScrollView } from '@/components/keyboard-aware-scroll'
+import { formatCurrency, formatDate, formatDateTime, formatTime } from '@/lib/format'
 import { colors, withAlpha } from '@/lib/theme'
 import { cardShadow } from '@/components/vehicle-card'
-import type { CurrentUser, StaffMember, StatusHistoryEntry, StockProductLite, WorkOrderImage } from '@/lib/api'
+import type {
+  CurrentUser,
+  StaffMember,
+  StatusHistoryEntry,
+  StockProductLite,
+  WorkOrderImage,
+  WorkOrderPayment,
+  WorkOrderPaymentResult,
+} from '@/lib/api'
 import {
   absoluteImageUrl,
   createSupplier,
+  getCachedEntitlements,
+  getShopPaymentInfo,
+  getSupplierLedger,
   getWorkOrderHistory,
   getWorkOrderImages,
   listStockProducts,
   listSuppliers,
+  listWorkOrderPayments,
+  recordSupplierPayment,
+  scanInvoiceApi,
   uploadWorkOrderImage,
+  type InvoiceScanLine,
+  type ShopPaymentInfo,
   WorkOrderCompletedError,
   WorkOrderReopenBlockedError,
 } from '@/lib/api'
@@ -76,8 +102,51 @@ import {
 
 const ASSIGNABLE_ROLES = ['admin', 'usta']
 
+const STATUS_STEPS: { key: JobStatus; short: string }[] = [
+  { key: 'bekliyor', short: 'Bekliyor' },
+  { key: 'islemde', short: 'İşlemde' },
+  { key: 'tamamlandi', short: 'Tamam' },
+  { key: 'odeme_tamamlandi', short: 'Ödeme' },
+  { key: 'teslim_edildi', short: 'Teslim' },
+]
+
+function statusStepIndex(status: JobStatus): number {
+  const i = STATUS_STEPS.findIndex((s) => s.key === status)
+  return i >= 0 ? i : 0
+}
+
 function showError(e: unknown) {
   Alert.alert('Hata', e instanceof Error ? e.message : 'İşlem başarısız.')
+}
+
+/** Kayıt sonrası fotoğraf yükler; hata olursa kullanıcıya gösterir. */
+async function attachPhotoAfterSave(
+  workOrderId: string | undefined,
+  photoUri: string | null,
+  imageType: 'ruhsat' | 'arac' | 'hasar' | 'diger',
+  opts?: { complaintId?: string; serviceId?: string },
+): Promise<boolean> {
+  if (!photoUri) return true
+  if (!workOrderId) {
+    Alert.alert('Fotoğraf yüklenemedi', 'İş emri bulunamadı. Kaydı yenileyip tekrar deneyin.')
+    return false
+  }
+  try {
+    await uploadWorkOrderImage(
+      workOrderId,
+      photoUri,
+      imageType,
+      opts?.complaintId,
+      opts?.serviceId,
+    )
+    return true
+  } catch (e) {
+    Alert.alert(
+      'Fotoğraf yüklenemedi',
+      e instanceof Error ? e.message : 'Kayıt eklendi ancak fotoğraf sunucuya gönderilemedi.',
+    )
+    return false
+  }
 }
 
 function normalizePhoneForWhatsApp(phone: string): string {
@@ -225,7 +294,7 @@ export function VehicleDetail({
   serviceCatalog: catalogProp,
   currentUser,
   staff,
-  onBack,
+  onBack: _onBack,
   onAddComplaint,
   onUpdateComplaint,
   onAddService,
@@ -236,32 +305,54 @@ export function VehicleDetail({
   onDeleteProduct,
   onReturnProductToSupplier,
   onSetStatus,
+  onAddPayment,
+  onUpdatePayment,
+  onDeletePayment,
+  onUpdateDiscount,
   onOpenNewVisit,
+  onDeleteWaiting,
 }: {
   vehicle: Vehicle
   serviceCatalog?: ServiceCatalogItem[]
   currentUser: CurrentUser | null
   staff: StaffMember[]
   onBack: () => void
-  onAddComplaint: (text: string) => void
-  onUpdateComplaint: (complaintId: string, text: string) => void
-  onAddService: (s: Omit<ServiceItem, 'id'>, force?: boolean) => Promise<void>
+  onAddComplaint: (text: string, category: ComplaintCategory) => Promise<string | undefined>
+  onUpdateComplaint: (complaintId: string, text: string, category: ComplaintCategory) => void
+  onAddService: (s: Omit<ServiceItem, 'id'>, force?: boolean) => Promise<string | undefined>
   onUpdateService: (id: string, s: Omit<ServiceItem, 'id'>) => void
   onDeleteService: (id: string) => void
   onAddProduct: (p: Omit<ProductItem, 'id'>, force?: boolean) => Promise<void>
-  onUpdateProduct: (id: string, p: Omit<ProductItem, 'id'>) => void
+  onUpdateProduct: (id: string, p: Omit<ProductItem, 'id'>) => void | Promise<void>
   onDeleteProduct: (id: string) => void
   onReturnProductToSupplier: (id: string) => void
   onSetStatus: (
     status: JobStatus,
     assignment?: { assignedUserId?: string; assignedUserName?: string },
   ) => Promise<void>
+  onAddPayment: (
+    amount: number,
+    method: 'nakit' | 'kart' | 'havale',
+  ) => Promise<WorkOrderPaymentResult>
+  onUpdatePayment: (
+    paymentId: string,
+    amount: number,
+    method: 'nakit' | 'kart' | 'havale',
+  ) => Promise<WorkOrderPaymentResult>
+  onDeletePayment: (paymentId: string) => Promise<WorkOrderPaymentResult>
+  onUpdateDiscount: (amount: number) => Promise<WorkOrderPaymentResult>
   onOpenNewVisit: (complaint?: string) => void
+  onDeleteWaiting?: () => Promise<void>
 }) {
   const serviceCatalog = catalogProp ?? defaultCatalog
-  const insets = useSafeAreaInsets()
   const [tab, setTab] = useState<Tab>('bilgiler')
   const [assignOpen, setAssignOpen] = useState(false)
+  const [shareOpen, setShareOpen] = useState(false)
+  const [payOpen, setPayOpen] = useState(false)
+  const [ibanOpen, setIbanOpen] = useState(false)
+  const [discountOpen, setDiscountOpen] = useState(false)
+  const [editPayment, setEditPayment] = useState<WorkOrderPayment | null>(null)
+  const [payments, setPayments] = useState<WorkOrderPayment[]>([])
 
   const canAssign = !!currentUser && ASSIGNABLE_ROLES.includes(currentUser.role)
 
@@ -287,7 +378,45 @@ export function VehicleDetail({
     }
   }
 
-  async function handleStatusPress(s: JobStatus) {
+  const laborTotal = vehicle.laborTotal ?? vehicle.services.reduce((s, i) => s + i.price, 0)
+  const partsTotal =
+    vehicle.partsTotal ??
+    vehicle.products
+      .filter((p) => !p.returnedAt)
+      .reduce((s, i) => s + i.price * i.quantity, 0)
+  const discount = vehicle.discount ?? 0
+  const total = vehicle.grandTotal ?? Math.max(0, laborTotal + partsTotal - discount)
+  const paidTotal = vehicle.paidTotal ?? 0
+  const remaining = Math.max(0, Math.round((total - paidTotal) * 100) / 100)
+  const showPaymentUi =
+    vehicle.status === 'tamamlandi' ||
+    vehicle.status === 'teslim_edildi' ||
+    vehicle.status === 'odeme_tamamlandi' ||
+    paidTotal > 0 ||
+    payments.length > 0 ||
+    discount > 0
+  const paymentNotDone =
+    vehicle.status !== 'odeme_tamamlandi' && vehicle.status !== 'teslim_edildi'
+  const jobSuppliersForPay = useMemo(
+    () => jobSupplierPayOptions(vehicle.products),
+    [vehicle.products],
+  )
+
+  async function reloadPayments() {
+    if (!vehicle.workOrderId) return
+    try {
+      setPayments(await listWorkOrderPayments(vehicle.workOrderId))
+    } catch {
+      setPayments([])
+    }
+  }
+
+  useEffect(() => {
+    reloadPayments()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vehicle.workOrderId, vehicle.paidTotal, vehicle.grandTotal, vehicle.discount])
+
+  async function applyStatus(s: JobStatus) {
     try {
       if (s !== 'islemde') {
         await onSetStatus(s)
@@ -303,116 +432,292 @@ export function VehicleDetail({
     }
   }
 
-  async function handleShare() {
-    Alert.alert('Paylaş', 'İş emrini nasıl paylaşmak istersiniz?', [
-      { text: 'İptal', style: 'cancel' },
-      { text: "WhatsApp'tan Paylaş", onPress: () => shareViaWhatsApp(vehicle) },
-      { text: 'Detay Paylaş', onPress: () => shareAsText(vehicle) },
-      { text: 'PDF Paylaş', onPress: () => sharePdf(vehicle) },
-    ])
+  function handleStatusPress(s: JobStatus) {
+    if (s === vehicle.status) return
+
+    if (s === 'odeme_tamamlandi' && remaining > 0) {
+      Alert.alert(
+        'Kalan tutar var',
+        `Henüz ${formatCurrency(remaining)} ödenmedi. Yine de Ödeme Tamamlandı olarak işaretlensin mi?`,
+        [
+          { text: 'İptal', style: 'cancel' },
+          {
+            text: 'Evet',
+            style: 'destructive',
+            onPress: () => {
+              void applyStatus('odeme_tamamlandi')
+            },
+          },
+        ],
+      )
+      return
+    }
+
+    if (s === 'teslim_edildi' && (paymentNotDone || remaining > 0)) {
+      const detail =
+        remaining > 0
+          ? `Henüz ${formatCurrency(remaining)} ödenmedi. Önce ödeme almanız önerilir.`
+          : 'Ödeme henüz tamamlanmadı. Önce Ödeme Tamamlandı yapmanız önerilir.'
+      Alert.alert('Ödeme alınmadı', `${detail}\n\nYine de teslim edilsin mi?`, [
+        { text: 'İptal', style: 'cancel' },
+        {
+          text: 'Yine de Teslim Et',
+          style: 'destructive',
+          onPress: () => {
+            void applyStatus('teslim_edildi')
+          },
+        },
+      ])
+      return
+    }
+    void applyStatus(s)
   }
 
-  const laborTotal = vehicle.laborTotal ?? vehicle.services.reduce((s, i) => s + i.price, 0)
-  const partsTotal =
-    vehicle.partsTotal ??
-    vehicle.products
-      .filter((p) => !p.returnedAt)
-      .reduce((s, i) => s + i.price * i.quantity, 0)
-  const total = vehicle.grandTotal ?? laborTotal + partsTotal
+  function handleShare() {
+    setShareOpen(true)
+  }
+
+  async function afterPaymentRecorded(grandTotal: number, paid: number) {
+    const rem = Math.max(0, Math.round((grandTotal - paid) * 100) / 100)
+    if (rem > 0) return
+    if (vehicle.status !== 'tamamlandi') return
+    try {
+      await onSetStatus('odeme_tamamlandi')
+    } catch (e) {
+      handleStatusError(e)
+    }
+  }
+
+  // Tamamen ödenmiş ama durum hâlâ "tamamlandi" kaldıysa otomatik ilerlet
+  useEffect(() => {
+    if (vehicle.status !== 'tamamlandi' || remaining > 0) return
+    void onSetStatus('odeme_tamamlandi').catch(() => {
+      /* kullanıcı Durumu düzelt ile devam edebilir */
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vehicle.status, remaining])
 
   return (
     <View className="flex-1">
-      <ScrollView
+      <KeyboardAwareScrollView
         className="flex-1"
         stickyHeaderIndices={[2]}
-        contentContainerStyle={{ paddingBottom: insets.bottom + 8 }}
+        basePaddingBottom={32}
         showsVerticalScrollIndicator={false}
       >
-        <View
-          className="rounded-b-3xl bg-primary px-4 pb-5"
-          style={{ paddingTop: insets.top + 12 }}
-        >
+        <View className="mx-4 mt-4 rounded-3xl border border-border bg-card px-4 py-4" style={cardShadow}>
           <View className="flex-row items-center justify-between gap-3">
-            <View className="flex-row items-center gap-3">
-              <Pressable
-                onPress={onBack}
-                className="h-11 w-11 items-center justify-center rounded-xl bg-primary-foreground/15"
-              >
-                <ArrowLeft size={20} color={colors.primaryForeground} />
-              </Pressable>
-              <View className="rounded-lg bg-primary-foreground px-3 py-1.5">
-                <Text className="font-mono text-base font-bold tracking-wide text-primary">
-                  {vehicle.plate}
-                </Text>
-              </View>
+            <View className="rounded-lg bg-foreground px-3 py-1.5">
+              <Text className="font-mono text-base font-bold tracking-wide text-background">
+                {vehicle.plate}
+              </Text>
             </View>
             <Pressable
               onPress={handleShare}
-              className="h-11 w-11 items-center justify-center rounded-xl bg-primary-foreground/15"
+              className="h-11 w-11 items-center justify-center rounded-xl bg-secondary"
             >
-              <Share2 size={18} color={colors.primaryForeground} />
+              <Share2 size={18} color={colors.secondaryForeground} />
             </Pressable>
           </View>
 
-          <Text className="mt-4 text-2xl font-extrabold tracking-tight text-primary-foreground">
+          <Text className="mt-3 text-2xl font-extrabold tracking-tight text-foreground">
             {vehicle.brand} {vehicle.model}
           </Text>
-          <Text className="text-sm text-primary-foreground/80">
+          <Text className="text-sm text-muted-foreground">
             {vehicle.year} · {vehicle.color} · {vehicle.fuel}
           </Text>
 
-          <View className="mt-4 flex-row flex-wrap gap-2">
-            {(Object.keys(STATUS_LABELS) as JobStatus[]).map((s) => {
-              const active = vehicle.status === s
-              return (
-                <Pressable
-                  key={s}
-                  onPress={() => handleStatusPress(s)}
-                  className={cn(
-                    'flex-row items-center gap-1.5 rounded-full px-3 py-1.5',
-                    active ? 'bg-primary-foreground' : 'bg-primary-foreground/15',
-                  )}
-                >
-                  {active && <Check size={14} color={colors.primary} strokeWidth={3} />}
-                  <Text
-                    className={cn(
-                      'text-xs font-bold',
-                      active ? 'text-primary' : 'text-primary-foreground',
-                    )}
-                  >
-                    {STATUS_LABELS[s]}
-                  </Text>
-                </Pressable>
-              )
-            })}
-          </View>
+          <StatusStepper
+            status={vehicle.status}
+            onSelectStatus={(s) => handleStatusPress(s)}
+          />
 
-          {vehicle.status === 'bekliyor' && (
+          {/* Duruma göre ana işlem butonu */}
+          {vehicle.status === 'bekliyor' ? (
+            <View className="mt-3 gap-2">
+              <Pressable
+                onPress={() => handleStatusPress('islemde')}
+                className="h-12 flex-row items-center justify-center gap-2 rounded-xl bg-accent active:opacity-90"
+              >
+                <PlayCircle size={18} color={colors.accentForeground} />
+                <Text className="text-sm font-extrabold text-accent-foreground">İşleme Al</Text>
+              </Pressable>
+              {onDeleteWaiting ? (
+                <Pressable
+                  onPress={() => {
+                    Alert.alert(
+                      'Kaydı sil',
+                      `${vehicle.plate} bekleyen kaydı sistemden silinsin mi?\nİşleme alınmamış kayıtlar silinebilir.`,
+                      [
+                        { text: 'İptal', style: 'cancel' },
+                        {
+                          text: 'Sil',
+                          style: 'destructive',
+                          onPress: () => {
+                            void onDeleteWaiting().catch(showError)
+                          },
+                        },
+                      ],
+                    )
+                  }}
+                  className="h-12 flex-row items-center justify-center gap-2 rounded-xl border-2 border-destructive/40 bg-destructive/10 active:opacity-90"
+                >
+                  <Trash2 size={18} color={colors.destructive} />
+                  <Text className="text-sm font-extrabold text-destructive">Kaydı Sil</Text>
+                </Pressable>
+              ) : null}
+            </View>
+          ) : null}
+
+          {vehicle.status === 'islemde' ? (
             <Pressable
-              onPress={() => handleStatusPress('islemde')}
+              onPress={() => handleStatusPress('tamamlandi')}
+              className="mt-3 h-12 flex-row items-center justify-center gap-2 rounded-xl bg-chart-4 active:opacity-90"
+            >
+              <Check size={18} color="#fff" />
+              <Text className="text-sm font-extrabold text-white">İşlemi Tamamla</Text>
+            </Pressable>
+          ) : null}
+
+          {vehicle.status === 'tamamlandi' && remaining > 0 ? (
+            <Pressable
+              onPress={() => setPayOpen(true)}
+              className="mt-3 h-12 flex-row items-center justify-center gap-2 rounded-xl bg-primary active:opacity-90"
+            >
+              <Banknote size={18} color={colors.primaryForeground} />
+              <Text className="text-sm font-extrabold text-primary-foreground">
+                Müşteriden Tahsilat · {formatCurrency(remaining)}
+              </Text>
+            </Pressable>
+          ) : null}
+
+          {vehicle.status === 'tamamlandi' && remaining <= 0 ? (
+            <Pressable
+              onPress={() => handleStatusPress('odeme_tamamlandi')}
+              className="mt-3 h-12 flex-row items-center justify-center gap-2 rounded-xl bg-chart-4 active:opacity-90"
+            >
+              <Banknote size={18} color="#fff" />
+              <Text className="text-sm font-extrabold text-white">Ödemeyi Onayla</Text>
+            </Pressable>
+          ) : null}
+
+          {vehicle.status === 'odeme_tamamlandi' ? (
+            <Pressable
+              onPress={() => handleStatusPress('teslim_edildi')}
               className="mt-3 h-12 flex-row items-center justify-center gap-2 rounded-xl bg-accent active:opacity-90"
             >
-              <PlayCircle size={18} color={colors.accentForeground} />
-              <Text className="text-sm font-extrabold text-accent-foreground">İşleme Al</Text>
+              <Check size={18} color={colors.accentForeground} />
+              <Text className="text-sm font-extrabold text-accent-foreground">
+                Müşteriye Teslim Et
+              </Text>
             </Pressable>
-          )}
+          ) : null}
 
-          {vehicle.status === 'tamamlandi' && (
+          {vehicle.status === 'teslim_edildi' ? (
             <Pressable
               onPress={promptNewVisit}
-              className="mt-3 h-12 flex-row items-center justify-center gap-2 rounded-xl bg-primary-foreground/15 active:opacity-90"
+              className="mt-3 h-12 flex-row items-center justify-center gap-2 rounded-xl bg-primary active:opacity-90"
             >
               <CalendarPlus size={18} color={colors.primaryForeground} />
               <Text className="text-sm font-extrabold text-primary-foreground">
                 Yeni Servis Kaydı
               </Text>
             </Pressable>
+          ) : null}
+
+          {showPaymentUi && (
+            <View className="mt-3 rounded-2xl border border-border bg-secondary/60 px-3 py-3">
+              <View className="flex-row items-center justify-between">
+                <Text className="text-sm font-semibold text-muted-foreground">Kalan tutar</Text>
+                <Text className="text-base font-extrabold text-foreground">
+                  {formatCurrency(remaining)}
+                </Text>
+              </View>
+
+              {/* Birincil tahsilat yalnızca durum CTA'sı tamamlandi değilken burada */}
+              {remaining > 0 && vehicle.status !== 'tamamlandi' ? (
+                <Pressable
+                  onPress={() => setPayOpen(true)}
+                  className="mt-2.5 h-12 flex-row items-center justify-center gap-2 rounded-xl bg-primary active:opacity-90"
+                >
+                  <Banknote size={17} color={colors.primaryForeground} />
+                  <Text className="text-sm font-extrabold text-primary-foreground">
+                    Müşteriden Tahsilat
+                  </Text>
+                </Pressable>
+              ) : null}
+
+              <View className="mt-2.5 flex-row gap-2">
+                <Pressable
+                  onPress={() => setDiscountOpen(true)}
+                  className="h-12 flex-1 flex-row items-center justify-center gap-2 rounded-xl border-2 border-border bg-card active:opacity-90"
+                >
+                  <Text className="text-sm font-extrabold text-foreground">İskonto</Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => setIbanOpen(true)}
+                  className="h-12 flex-1 flex-row items-center justify-center gap-2 rounded-xl border-2 border-border bg-card active:opacity-90"
+                >
+                  <Landmark size={17} color={colors.foreground} />
+                  <Text className="text-sm font-extrabold text-foreground">IBAN</Text>
+                </Pressable>
+              </View>
+
+              {(paidTotal > 0 || payments.length > 0) && (
+                <View className="mt-3 border-t border-border pt-3">
+                  <View className="mb-2 flex-row items-center justify-between">
+                    <Text className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                      Ödemeler
+                    </Text>
+                    <Text className="text-xs font-semibold text-muted-foreground">
+                      Ödenen {formatCurrency(paidTotal)}
+                    </Text>
+                  </View>
+                  {payments.length === 0 ? (
+                    <Text className="text-xs text-muted-foreground">
+                      Ödeme kaydı yüklenemedi. Aşağı çekerek yenileyin.
+                    </Text>
+                  ) : (
+                    <View className="gap-2">
+                      {payments.map((p) => (
+                        <PaymentRow
+                          key={p.id}
+                          payment={p}
+                          onEdit={() => setEditPayment(p)}
+                          onDelete={() => {
+                            Alert.alert(
+                              'Ödemeyi sil',
+                              `${formatCurrency(p.amount)} tutarındaki ödeme silinsin mi?\nBu tahsilatla birlikte yazılan tedarikçi ödemesi de geri alınır.`,
+                              [
+                                { text: 'İptal', style: 'cancel' },
+                                {
+                                  text: 'Sil',
+                                  style: 'destructive',
+                                  onPress: () => {
+                                    onDeletePayment(p.id)
+                                      .then((r) => {
+                                        reloadPayments()
+                                        return afterPaymentRecorded(r.grandTotal, r.paidTotal)
+                                      })
+                                      .catch(showError)
+                                  },
+                                },
+                              ],
+                            )
+                          }}
+                        />
+                      ))}
+                    </View>
+                  )}
+                </View>
+              )}
+            </View>
           )}
 
           {vehicle.assignedTo ? (
             <View className="mt-2.5 flex-row items-center gap-1.5">
-              <User size={13} color={colors.primaryForeground} />
-              <Text className="text-xs font-semibold text-primary-foreground/80">
+              <User size={13} color={colors.mutedForeground} />
+              <Text className="text-xs font-semibold text-muted-foreground">
                 Bu işi yapan: {vehicle.assignedTo}
               </Text>
             </View>
@@ -488,16 +793,76 @@ export function VehicleDetail({
                   {formatCurrency(partsTotal)}
                 </Text>
               </View>
+              {(discount > 0 || showPaymentUi) && (
+                <Pressable
+                  onPress={() => setDiscountOpen(true)}
+                  className="mt-1.5 flex-row items-center justify-between"
+                >
+                  <Text className="text-sm font-medium text-background/70">İskonto</Text>
+                  <Text className="text-sm font-bold text-background/90">
+                    {discount > 0 ? `−${formatCurrency(discount)}` : 'Ekle'}
+                  </Text>
+                </Pressable>
+              )}
               <View className="mt-2.5 flex-row items-center justify-between border-t border-background/15 pt-2.5">
                 <Text className="text-sm font-semibold text-background/80">Toplam</Text>
                 <Text className="text-xl font-extrabold text-background">
                   {formatCurrency(total)}
                 </Text>
               </View>
+              {(paidTotal > 0 || payments.length > 0) && (
+                <>
+                  <View className="mt-1.5 flex-row items-center justify-between">
+                    <Text className="text-sm font-medium text-background/70">Ödenen</Text>
+                    <Text className="text-sm font-bold text-background/90">
+                      {formatCurrency(paidTotal)}
+                    </Text>
+                  </View>
+                  <View className="mt-1.5 flex-row items-center justify-between">
+                    <Text className="text-sm font-semibold text-background/80">Kalan</Text>
+                    <Text className="text-base font-extrabold text-background">
+                      {formatCurrency(remaining)}
+                    </Text>
+                  </View>
+                  {payments.length > 0 && (
+                    <View className="mt-3 gap-2 border-t border-background/15 pt-3">
+                      {payments.map((p) => (
+                        <PaymentRow
+                          key={p.id}
+                          payment={p}
+                          dark
+                          onEdit={() => setEditPayment(p)}
+                          onDelete={() => {
+                            Alert.alert(
+                              'Ödemeyi sil',
+                              `${formatCurrency(p.amount)} tutarındaki ödeme silinsin mi?\nBu tahsilatla birlikte yazılan tedarikçi ödemesi de geri alınır.`,
+                              [
+                                { text: 'İptal', style: 'cancel' },
+                                {
+                                  text: 'Sil',
+                                  style: 'destructive',
+                                  onPress: () => {
+                                    onDeletePayment(p.id)
+                                      .then((r) => {
+                                        reloadPayments()
+                                        return afterPaymentRecorded(r.grandTotal, r.paidTotal)
+                                      })
+                                      .catch(showError)
+                                  },
+                                },
+                              ],
+                            )
+                          }}
+                        />
+                      ))}
+                    </View>
+                  )}
+                </>
+              )}
             </View>
           </View>
         )}
-      </ScrollView>
+      </KeyboardAwareScrollView>
 
       <AssignmentModal
         visible={assignOpen}
@@ -509,7 +874,209 @@ export function VehicleDetail({
           onSetStatus('islemde', assignment).catch(handleStatusError)
         }}
       />
+
+      <ShareSheet
+        visible={shareOpen}
+        vehicle={vehicle}
+        onClose={() => setShareOpen(false)}
+      />
+
+      <PaymentSheet
+        visible={payOpen}
+        remaining={remaining}
+        maxAmount={remaining}
+        jobSuppliers={jobSuppliersForPay}
+        onClose={() => setPayOpen(false)}
+        onSubmit={async (amount, method, supplierPay) => {
+          const result = await onAddPayment(amount, method)
+          if (supplierPay) {
+            try {
+              const pid = result.paymentId
+              const desc = pid
+                ? `İş emri tahsilatı · ${vehicle.plate} · pid:${pid}`
+                : `İş emri tahsilatı · ${vehicle.plate}`
+              const ledger = await recordSupplierPayment(
+                supplierPay.id,
+                supplierPay.amount,
+                desc,
+                supplierPay.method,
+              )
+              Alert.alert(
+                'Kaydedildi',
+                `Müşteri tahsilatı: ${formatCurrency(amount)}\n${supplierPay.name} ödemesi: ${formatCurrency(supplierPay.amount)}\nYeni tedarikçi bakiyesi: ${formatCurrency(ledger.supplier.balance)}`,
+              )
+            } catch (e) {
+              Alert.alert(
+                'Tahsilat alındı',
+                `Müşteri ödemesi kaydedildi ancak tedarikçi ödemesi yazılamadı.\n${e instanceof Error ? e.message : 'Tekrar deneyin.'}`,
+              )
+            }
+          }
+          setPayOpen(false)
+          await reloadPayments()
+          await afterPaymentRecorded(result.grandTotal, result.paidTotal)
+        }}
+      />
+
+      <PaymentSheet
+        visible={!!editPayment}
+        remaining={remaining}
+        maxAmount={
+          Math.round((remaining + (editPayment?.amount ?? 0)) * 100) / 100
+        }
+        initialAmount={editPayment?.amount}
+        initialMethod={
+          editPayment?.method === 'kart' || editPayment?.method === 'havale'
+            ? editPayment.method
+            : 'nakit'
+        }
+        title="Ödemeyi Düzenle"
+        onClose={() => setEditPayment(null)}
+        onSubmit={async (amount, method) => {
+          if (!editPayment) return
+          const result = await onUpdatePayment(editPayment.id, amount, method)
+          setEditPayment(null)
+          await reloadPayments()
+          await afterPaymentRecorded(result.grandTotal, result.paidTotal)
+        }}
+      />
+
+      <DiscountSheet
+        visible={discountOpen}
+        current={discount}
+        maxAmount={laborTotal + partsTotal}
+        onClose={() => setDiscountOpen(false)}
+        onSubmit={async (amount) => {
+          const result = await onUpdateDiscount(amount)
+          setDiscountOpen(false)
+          await afterPaymentRecorded(result.grandTotal, result.paidTotal)
+        }}
+      />
+
+      <IbanShareSheet
+        visible={ibanOpen}
+        vehicle={vehicle}
+        amount={remaining > 0 ? remaining : total}
+        onClose={() => setIbanOpen(false)}
+      />
     </View>
+  )
+}
+
+function StatusStepper({
+  status,
+  onSelectStatus,
+}: {
+  status: JobStatus
+  onSelectStatus: (s: JobStatus) => void
+}) {
+  const activeIdx = statusStepIndex(status)
+  return (
+    <View className="mt-4 rounded-2xl border border-border bg-secondary/50 px-2.5 py-2.5">
+      <Text className="mb-2 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
+        Durum · {STATUS_LABELS[status]}
+      </Text>
+      <View className="flex-row items-center">
+        {STATUS_STEPS.map((step, i) => {
+          const done = i < activeIdx
+          const active = i === activeIdx
+          return (
+            <View key={step.key} className="min-w-0 flex-1 flex-row items-center">
+              <Pressable
+                onPress={() => onSelectStatus(step.key)}
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
+                className="min-w-0 flex-1 items-center active:opacity-80"
+              >
+                <View
+                  className={cn(
+                    'h-8 w-8 items-center justify-center rounded-full',
+                    active ? 'bg-primary' : done ? 'bg-chart-4' : 'bg-border',
+                  )}
+                >
+                  {done ? (
+                    <Check size={14} color="#fff" strokeWidth={3} />
+                  ) : (
+                    <Text
+                      className={cn(
+                        'text-[11px] font-extrabold',
+                        active ? 'text-primary-foreground' : 'text-muted-foreground',
+                      )}
+                    >
+                      {i + 1}
+                    </Text>
+                  )}
+                </View>
+                <Text
+                  className={cn(
+                    'mt-1 text-center text-[10px] font-bold',
+                    active ? 'text-primary' : done ? 'text-foreground' : 'text-muted-foreground',
+                  )}
+                  numberOfLines={1}
+                >
+                  {step.short}
+                </Text>
+              </Pressable>
+              {i < STATUS_STEPS.length - 1 ? (
+                <View
+                  className={cn('mb-4 h-0.5 w-1.5', i < activeIdx ? 'bg-chart-4' : 'bg-border')}
+                />
+              ) : null}
+            </View>
+          )
+        })}
+      </View>
+    </View>
+  )
+}
+
+function ShareSheet({
+  visible,
+  vehicle,
+  onClose,
+}: {
+  visible: boolean
+  vehicle: Vehicle
+  onClose: () => void
+}) {
+  return (
+    <AppSheet
+      visible={visible}
+      onClose={onClose}
+      title="Paylaş"
+      subtitle={`${vehicle.plate} iş emrini nasıl paylaşmak istersiniz?`}
+    >
+      <SheetActionList
+        onClose={onClose}
+        actions={[
+          {
+            key: 'whatsapp',
+            label: "WhatsApp'tan Paylaş",
+            description: 'Müşteriye mesaj olarak gönder',
+            icon: MessageCircle,
+            tone: 'accent',
+            onPress: () => shareViaWhatsApp(vehicle),
+          },
+          {
+            key: 'text',
+            label: 'Detay Paylaş',
+            description: 'Özet metni diğer uygulamalarla gönder',
+            icon: Share2,
+            tone: 'primary',
+            onPress: () => shareAsText(vehicle),
+          },
+          {
+            key: 'pdf',
+            label: 'PDF Paylaş',
+            description: 'Yazdırılabilir PDF oluştur',
+            icon: FileText,
+            tone: 'primary',
+            onPress: () => sharePdf(vehicle),
+          },
+        ]}
+      />
+      <SheetCancelButton onPress={onClose} />
+    </AppSheet>
   )
 }
 
@@ -587,8 +1154,729 @@ function StatusTimeline({ workOrderId }: { workOrderId: string }) {
 
 function mapHistoryStatus(raw: string): JobStatus {
   if (raw === 'islemde') return 'islemde'
-  if (raw === 'tamamlandi' || raw === 'teslim_edildi') return 'tamamlandi'
+  if (raw === 'teslim_edildi') return 'teslim_edildi'
+  if (raw === 'odeme_tamamlandi') return 'odeme_tamamlandi'
+  if (raw === 'tamamlandi') return 'tamamlandi'
   return 'bekliyor'
+}
+
+function PaymentRow({
+  payment,
+  onEdit,
+  onDelete,
+  dark = false,
+}: {
+  payment: WorkOrderPayment
+  onEdit: () => void
+  onDelete: () => void
+  dark?: boolean
+}) {
+  return (
+    <View
+      className={
+        dark
+          ? 'rounded-xl bg-background/10 px-3 py-2.5'
+          : 'rounded-xl border border-border bg-card px-3 py-2.5'
+      }
+    >
+      <View className="flex-row items-start justify-between gap-2">
+        <View className="min-w-0 flex-1">
+          <Text
+            className={
+              dark
+                ? 'text-sm font-bold text-background'
+                : 'text-sm font-bold text-foreground'
+            }
+          >
+            {formatCurrency(payment.amount)}
+            <Text className={dark ? 'font-medium text-background/70' : 'font-medium text-muted-foreground'}>
+              {' · '}
+              {PAY_METHOD_LABELS[payment.method] ?? payment.method}
+            </Text>
+          </Text>
+          <Text className={dark ? 'mt-0.5 text-xs text-background/60' : 'mt-0.5 text-xs text-muted-foreground'}>
+            {formatDateTime(payment.paidAt)}
+          </Text>
+        </View>
+      </View>
+      <View className="mt-2 flex-row gap-2">
+        <Pressable
+          onPress={onEdit}
+          className={
+            dark
+              ? 'h-9 flex-1 flex-row items-center justify-center gap-1.5 rounded-lg bg-background/15'
+              : 'h-9 flex-1 flex-row items-center justify-center gap-1.5 rounded-lg bg-secondary'
+          }
+        >
+          <Pencil size={14} color={dark ? colors.background : colors.secondaryForeground} />
+          <Text
+            className={
+              dark
+                ? 'text-xs font-bold text-background'
+                : 'text-xs font-bold text-secondary-foreground'
+            }
+          >
+            Düzenle
+          </Text>
+        </Pressable>
+        <Pressable
+          onPress={onDelete}
+          className={
+            dark
+              ? 'h-9 flex-1 flex-row items-center justify-center gap-1.5 rounded-lg bg-destructive/40'
+              : 'h-9 flex-1 flex-row items-center justify-center gap-1.5 rounded-lg bg-destructive/10'
+          }
+        >
+          <Trash2 size={14} color={dark ? colors.background : colors.destructive} />
+          <Text
+            className={
+              dark ? 'text-xs font-bold text-background' : 'text-xs font-bold text-destructive'
+            }
+          >
+            Sil
+          </Text>
+        </Pressable>
+      </View>
+    </View>
+  )
+}
+
+const PAY_METHODS: { key: 'nakit' | 'kart' | 'havale'; label: string }[] = [
+  { key: 'nakit', label: 'Nakit' },
+  { key: 'kart', label: 'Kart' },
+  { key: 'havale', label: 'Havale' },
+]
+
+const PAY_METHOD_LABELS: Record<string, string> = {
+  nakit: 'Nakit',
+  kart: 'Kart',
+  havale: 'Havale',
+  diger: 'Diğer',
+}
+
+type JobSupplierPayOption = {
+  id: string
+  name: string
+  suggestAmount: number
+}
+
+const EMPTY_JOB_SUPPLIERS: JobSupplierPayOption[] = []
+
+/** İş emrindeki dışarıdan ürünlerden tedarikçi bazlı alış toplamı. */
+function jobSupplierPayOptions(products: ProductItem[]): JobSupplierPayOption[] {
+  const map = new Map<string, JobSupplierPayOption>()
+  for (const p of products) {
+    if (p.source !== 'disaridan' || !p.supplierId || p.returnedAt) continue
+    const cost = Math.round((p.purchasePrice ?? 0) * p.quantity * 100) / 100
+    const prev = map.get(p.supplierId)
+    if (prev) {
+      prev.suggestAmount = Math.round((prev.suggestAmount + cost) * 100) / 100
+    } else {
+      map.set(p.supplierId, {
+        id: p.supplierId,
+        name: p.supplierName?.trim() || 'Tedarikçi',
+        suggestAmount: cost,
+      })
+    }
+  }
+  return [...map.values()].sort((a, b) => a.name.localeCompare(b.name, 'tr'))
+}
+
+/** "Tedarikçiye de öde" açıkken müşteriden alınan / tedarikçiye aktarılan tutarı
+ *  açıkça gösterir — tutar yalnızca tedarikçi alanından değiştirilirse (üstteki
+ *  "Müşteriden alınan" alanı dokunulmadan kalırsa) farkın işletmede kaldığını
+ *  netleştirip yanlışlıkla tam bakiye tahsil edilmiş gibi görünmesini engeller. */
+function SupplierSplitSummary({
+  customerAmount,
+  supplierAmount,
+  supplierName,
+}: {
+  customerAmount: string
+  supplierAmount: string
+  supplierName?: string
+}) {
+  const custVal = Number(String(customerAmount).replace(',', '.')) || 0
+  const supVal = Number(String(supplierAmount).replace(',', '.')) || 0
+  const leftover = Math.round((custVal - supVal) * 100) / 100
+  const name = supplierName ?? 'tedarikçiye'
+
+  return (
+    <View className="mt-1 gap-1 rounded-xl border border-border bg-card px-3 py-2.5">
+      <Text className="text-xs text-muted-foreground">
+        Müşteriden <Text className="font-extrabold text-foreground">{formatCurrency(custVal)}</Text> tahsil
+        edilecek, bunun <Text className="font-extrabold text-foreground">{formatCurrency(supVal)}</Text>{"'"}si{' '}
+        {name}{"'"}ye ödenecek.
+      </Text>
+      {leftover > 0.005 ? (
+        <Text className="text-xs font-bold text-amber-600">
+          Kalan {formatCurrency(leftover)} tedarikçiye gitmez, işletmede kalır.
+        </Text>
+      ) : leftover < -0.005 ? (
+        <Text className="text-xs font-bold text-destructive">
+          Tedarikçiye ödenen, müşteriden alınandan {formatCurrency(-leftover)} fazla!
+        </Text>
+      ) : null}
+    </View>
+  )
+}
+
+function PaymentSheet({
+  visible,
+  remaining,
+  maxAmount,
+  onClose,
+  onSubmit,
+  initialAmount,
+  initialMethod,
+  title = 'Müşteriden Tahsilat',
+  jobSuppliers = EMPTY_JOB_SUPPLIERS,
+}: {
+  visible: boolean
+  remaining: number
+  /** Bu ödemede alınabilecek üst sınır (yeni: kalan; düzenle: kalan + mevcut tutar). */
+  maxAmount: number
+  onClose: () => void
+  onSubmit: (
+    amount: number,
+    method: 'nakit' | 'kart' | 'havale',
+    supplierPay?: { id: string; name: string; amount: number; method: 'nakit' | 'kart' | 'havale' },
+  ) => Promise<void>
+  initialAmount?: number
+  initialMethod?: 'nakit' | 'kart' | 'havale'
+  title?: string
+  /** Tahsilatta birlikte kaydedilebilecek tedarikçi ödemeleri (sadece yeni tahsilat). */
+  jobSuppliers?: JobSupplierPayOption[]
+}) {
+  const [amount, setAmount] = useState('')
+  const [method, setMethod] = useState<'nakit' | 'kart' | 'havale'>('nakit')
+  const [busy, setBusy] = useState(false)
+  const [paySupplierAlso, setPaySupplierAlso] = useState(false)
+  const [supplierId, setSupplierId] = useState<string | undefined>()
+  const [supplierAmount, setSupplierAmount] = useState('')
+  const [supplierMethod, setSupplierMethod] = useState<'nakit' | 'kart' | 'havale'>('nakit')
+  /** Tedarikçi tutarı elle değiştirildiyse müşteri tutarıyla senkron kesilir. */
+  const [supplierAmountTouched, setSupplierAmountTouched] = useState(false)
+  const cap = Math.max(0, Math.round(maxAmount * 100) / 100)
+  const canOfferSupplier = title !== 'Ödemeyi Düzenle' && jobSuppliers.length > 0
+  const selectedSupplier = jobSuppliers.find((s) => s.id === supplierId) ?? jobSuppliers[0]
+
+  const wasVisibleRef = useRef(false)
+  useEffect(() => {
+    // Alanları yalnızca sheet kapalıyken açılırken sıfırla. Sheet açıkken
+    // parent'ın tekrar render olması (ör. remaining/jobSuppliers referansı
+    // değişmesi) kullanıcının yazdığı/sildiği tutarı geri sıfırlamamalı —
+    // aksi halde "Ödemeyi Düzenle" alanında rakam silinemiyor gibi görünür.
+    if (visible && !wasVisibleRef.current) {
+      const seed = initialAmount ?? (remaining > 0 ? remaining : 0)
+      const capped = Math.min(seed, cap)
+      const seedStr = capped > 0 ? String(capped) : ''
+      setAmount(seedStr)
+      setMethod(initialMethod ?? 'nakit')
+      setBusy(false)
+      setSupplierAmountTouched(false)
+      const first = jobSuppliers[0]
+      setPaySupplierAlso(
+        title !== 'Ödemeyi Düzenle' &&
+          jobSuppliers.some((s) => s.suggestAmount > 0),
+      )
+      setSupplierId(first?.id)
+      // Varsayılan: müşteriden alınan tutarın tamamı (alışa kilitleme)
+      setSupplierAmount(seedStr)
+      setSupplierMethod(initialMethod ?? 'nakit')
+    }
+    wasVisibleRef.current = visible
+  }, [visible, remaining, initialAmount, initialMethod, cap, jobSuppliers, title])
+
+  function handleCustomerAmountChange(v: string) {
+    setAmount(v)
+    if (paySupplierAlso && !supplierAmountTouched) setSupplierAmount(v)
+  }
+
+  function pickSupplier(id: string) {
+    setSupplierId(id)
+    if (!supplierAmountTouched) setSupplierAmount(amount)
+  }
+
+  async function submit() {
+    const value = Number(String(amount).replace(',', '.'))
+    if (!Number.isFinite(value) || value <= 0) {
+      Alert.alert('Geçersiz tutar', '0\'dan büyük bir tutar girin.')
+      return
+    }
+    if (value > cap + 0.001) {
+      Alert.alert(
+        'Tutar fazla',
+        `Kalan tutardan (${formatCurrency(cap)}) fazla ödeme alınamaz.`,
+      )
+      return
+    }
+
+    let supplierPay:
+      | { id: string; name: string; amount: number; method: 'nakit' | 'kart' | 'havale' }
+      | undefined
+    if (canOfferSupplier && paySupplierAlso && selectedSupplier) {
+      const sVal = Number(String(supplierAmount).replace(',', '.'))
+      if (!Number.isFinite(sVal) || sVal <= 0) {
+        Alert.alert('Tedarikçi tutarı', 'Tedarikçi ödemesi için 0\'dan büyük tutar girin veya seçeneği kapatın.')
+        return
+      }
+      supplierPay = {
+        id: selectedSupplier.id,
+        name: selectedSupplier.name,
+        amount: Math.round(sVal * 100) / 100,
+        method: supplierMethod,
+      }
+    }
+
+    setBusy(true)
+    try {
+      await onSubmit(Math.round(value * 100) / 100, method, supplierPay)
+    } catch (e) {
+      showError(e)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <AppSheet
+      visible={visible}
+      onClose={onClose}
+      title={title}
+      subtitle={
+        title === 'Ödemeyi Düzenle'
+          ? `En fazla: ${formatCurrency(cap)}`
+          : `Kalan: ${formatCurrency(remaining)}`
+      }
+    >
+      <TextField
+        label="Müşteriden alınan (₺)"
+        value={amount}
+        onChange={handleCustomerAmountChange}
+        inputMode="numeric"
+        placeholder="0"
+      />
+      <Text className="mt-1.5 text-xs text-muted-foreground">
+        En fazla {formatCurrency(cap)} alabilirsiniz.
+      </Text>
+      <Text className="mb-2 mt-3 text-xs font-bold uppercase tracking-wide text-muted-foreground">
+        Tahsilat yöntemi
+      </Text>
+      <View className="flex-row gap-2">
+        {PAY_METHODS.map((m) => {
+          const active = method === m.key
+          return (
+            <Pressable
+              key={m.key}
+              onPress={() => {
+                setMethod(m.key)
+                setSupplierMethod(m.key)
+              }}
+              className={cn(
+                'h-11 flex-1 items-center justify-center rounded-xl',
+                active ? 'bg-primary' : 'bg-secondary',
+              )}
+            >
+              <Text
+                className={cn(
+                  'text-sm font-bold',
+                  active ? 'text-primary-foreground' : 'text-secondary-foreground',
+                )}
+              >
+                {m.label}
+              </Text>
+            </Pressable>
+          )
+        })}
+      </View>
+
+      {canOfferSupplier ? (
+        <View className="mt-4 rounded-2xl border border-accent/30 bg-accent/10 px-3 py-3">
+          <Pressable
+            onPress={() => {
+              setPaySupplierAlso((v) => {
+                const next = !v
+                if (next && !supplierAmountTouched) setSupplierAmount(amount)
+                return next
+              })
+            }}
+            className="flex-row items-center gap-2.5"
+          >
+            <View
+              className={cn(
+                'h-5 w-5 items-center justify-center rounded border',
+                paySupplierAlso ? 'border-accent bg-accent' : 'border-border bg-card',
+              )}
+            >
+              {paySupplierAlso ? (
+                <Check size={12} color={colors.accentForeground} strokeWidth={3} />
+              ) : null}
+            </View>
+            <View className="flex-1">
+              <Text className="text-sm font-extrabold text-foreground">Tedarikçiye de öde</Text>
+              <Text className="mt-0.5 text-xs text-muted-foreground">
+                Yazılan tutarın tamamı tedarikçi carisine ödeme olarak işlenir
+              </Text>
+            </View>
+            <Truck size={18} color={colors.accent} />
+          </Pressable>
+
+          {paySupplierAlso ? (
+            <View className="mt-3 gap-2">
+              {jobSuppliers.length > 1 ? (
+                <View className="gap-1.5">
+                  <Text className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                    Tedarikçi
+                  </Text>
+                  <View className="gap-1.5">
+                    {jobSuppliers.map((s) => {
+                      const active = selectedSupplier?.id === s.id
+                      return (
+                        <Pressable
+                          key={s.id}
+                          onPress={() => pickSupplier(s.id)}
+                          className={cn(
+                            'rounded-xl border px-3 py-2.5',
+                            active ? 'border-accent bg-card' : 'border-border bg-card/60',
+                          )}
+                        >
+                          <Text
+                            className={cn(
+                              'text-sm font-bold',
+                              active ? 'text-foreground' : 'text-muted-foreground',
+                            )}
+                          >
+                            {s.name}
+                          </Text>
+                          <Text className="text-xs text-muted-foreground">
+                            Bu iş alış borcu: {formatCurrency(s.suggestAmount)}
+                          </Text>
+                        </Pressable>
+                      )
+                    })}
+                  </View>
+                </View>
+              ) : selectedSupplier ? (
+                <Text className="text-sm font-bold text-foreground">
+                  {selectedSupplier.name}
+                  <Text className="font-medium text-muted-foreground">
+                    {' '}
+                    · bu iş alış borcu {formatCurrency(selectedSupplier.suggestAmount)}
+                  </Text>
+                </Text>
+              ) : null}
+
+              <TextField
+                label="Tedarikçiye ödenen (₺)"
+                value={supplierAmount}
+                onChange={(v) => {
+                  setSupplierAmountTouched(true)
+                  setSupplierAmount(v)
+                }}
+                inputMode="numeric"
+                placeholder="0"
+              />
+              <Text className="text-xs text-muted-foreground">
+                Varsayılan müşteri tahsilatıyla aynıdır; istediğiniz tutarı yazabilirsiniz.
+              </Text>
+              <Text className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                Ödeme yöntemi
+              </Text>
+              <View className="flex-row gap-2">
+                {PAY_METHODS.map((m) => {
+                  const active = supplierMethod === m.key
+                  return (
+                    <Pressable
+                      key={m.key}
+                      onPress={() => setSupplierMethod(m.key)}
+                      className={cn(
+                        'h-10 flex-1 items-center justify-center rounded-xl border-2',
+                        active ? 'border-accent bg-accent' : 'border-border bg-card',
+                      )}
+                    >
+                      <Text
+                        className={cn(
+                          'text-xs font-bold',
+                          active ? 'text-accent-foreground' : 'text-foreground',
+                        )}
+                      >
+                        {m.label}
+                      </Text>
+                    </Pressable>
+                  )
+                })}
+              </View>
+              <SupplierSplitSummary
+                customerAmount={amount}
+                supplierAmount={supplierAmount}
+                supplierName={selectedSupplier?.name}
+              />
+            </View>
+          ) : null}
+        </View>
+      ) : null}
+
+      <Pressable
+        onPress={submit}
+        disabled={busy}
+        className="mt-4 h-12 items-center justify-center rounded-xl bg-primary active:opacity-90"
+      >
+        {busy ? (
+          <ActivityIndicator color={colors.primaryForeground} />
+        ) : (
+          <Text className="text-sm font-extrabold text-primary-foreground">
+            {title === 'Ödemeyi Düzenle'
+              ? 'Güncelle'
+              : paySupplierAlso && canOfferSupplier
+                ? 'Tahsilat + Tedarikçi Ödemesi'
+                : 'Kaydet'}
+          </Text>
+        )}
+      </Pressable>
+      <SheetCancelButton onPress={onClose} />
+    </AppSheet>
+  )
+}
+
+function DiscountSheet({
+  visible,
+  current,
+  maxAmount,
+  onClose,
+  onSubmit,
+}: {
+  visible: boolean
+  current: number
+  maxAmount: number
+  onClose: () => void
+  onSubmit: (amount: number) => Promise<void>
+}) {
+  const [amount, setAmount] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    if (visible) {
+      setAmount(current > 0 ? String(current) : '')
+      setBusy(false)
+    }
+  }, [visible, current])
+
+  async function submit() {
+    const value = Number(String(amount).replace(',', '.'))
+    if (!Number.isFinite(value) || value < 0) {
+      Alert.alert('Geçersiz tutar', 'İskonto 0 veya daha büyük olmalı.')
+      return
+    }
+    if (value > maxAmount) {
+      Alert.alert('Geçersiz tutar', `İskonto en fazla ${formatCurrency(maxAmount)} olabilir.`)
+      return
+    }
+    setBusy(true)
+    try {
+      await onSubmit(value)
+    } catch (e) {
+      showError(e)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <AppSheet
+      visible={visible}
+      onClose={onClose}
+      title="İskonto"
+      subtitle={`En fazla: ${formatCurrency(maxAmount)}`}
+    >
+      <TextField
+        label="İskonto tutarı (₺)"
+        value={amount}
+        onChange={setAmount}
+        inputMode="numeric"
+        placeholder="0"
+      />
+      <Pressable
+        onPress={submit}
+        disabled={busy}
+        className="mt-4 h-12 items-center justify-center rounded-xl bg-primary active:opacity-90"
+      >
+        {busy ? (
+          <ActivityIndicator color={colors.primaryForeground} />
+        ) : (
+          <Text className="text-sm font-extrabold text-primary-foreground">Kaydet</Text>
+        )}
+      </Pressable>
+      {current > 0 && (
+        <Pressable
+          onPress={async () => {
+            setBusy(true)
+            try {
+              await onSubmit(0)
+            } catch (e) {
+              showError(e)
+            } finally {
+              setBusy(false)
+            }
+          }}
+          disabled={busy}
+          className="mt-2 h-11 items-center justify-center rounded-xl bg-secondary"
+        >
+          <Text className="text-sm font-bold text-secondary-foreground">İskontoyu kaldır</Text>
+        </Pressable>
+      )}
+      <SheetCancelButton onPress={onClose} />
+    </AppSheet>
+  )
+}
+
+function buildIbanShareText(
+  info: ShopPaymentInfo,
+  vehicle: Vehicle,
+  amount: number,
+): string {
+  const alici = info.accountHolder?.trim() || info.shopName
+  const lines = [
+    alici ? `Alıcı: ${alici}` : null,
+    info.accountHolder?.trim() && info.shopName && info.accountHolder.trim() !== info.shopName
+      ? `Servis: ${info.shopName}`
+      : null,
+    info.bankIban ? `IBAN: ${info.bankIban}` : null,
+    info.bankName ? `Banka: ${info.bankName}` : null,
+    `Tutar: ${formatCurrency(amount)}`,
+    `Plaka: ${vehicle.plate}`,
+    `Müşteri: ${vehicle.customer.name}`,
+  ]
+  return lines.filter(Boolean).join('\n')
+}
+
+function IbanShareSheet({
+  visible,
+  vehicle,
+  amount,
+  onClose,
+}: {
+  visible: boolean
+  vehicle: Vehicle
+  amount: number
+  onClose: () => void
+}) {
+  const [info, setInfo] = useState<ShopPaymentInfo | null>(null)
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    if (!visible) return
+    let cancelled = false
+    setLoading(true)
+    getShopPaymentInfo()
+      .then((r) => {
+        if (!cancelled) setInfo(r)
+      })
+      .catch((e) => {
+        if (!cancelled) {
+          setInfo(null)
+          showError(e)
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [visible])
+
+  async function shareText() {
+    if (!info?.bankIban) {
+      Alert.alert('IBAN tanımlı değil', 'Servis IBAN bilgisi henüz girilmemiş. Yöneticiye bildirin.')
+      return
+    }
+    const message = buildIbanShareText(info, vehicle, amount)
+    try {
+      await Share.share({ message })
+    } catch {
+      Alert.alert('Paylaşım kullanılamıyor', 'Bu cihazda paylaşım özelliği bulunamadı.')
+    }
+  }
+
+  async function shareWhatsApp() {
+    if (!info?.bankIban) {
+      Alert.alert('IBAN tanımlı değil', 'Servis IBAN bilgisi henüz girilmemiş. Yöneticiye bildirin.')
+      return
+    }
+    const message = buildIbanShareText(info, vehicle, amount)
+    const phone = normalizePhoneForWhatsApp(vehicle.customer.phone)
+    const url = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`
+    const can = await Linking.canOpenURL(url)
+    if (!can) {
+      Alert.alert('WhatsApp açılamadı', 'WhatsApp yüklü değil veya açılamadı.')
+      return
+    }
+    await Linking.openURL(url)
+  }
+
+  return (
+    <AppSheet
+      visible={visible}
+      onClose={onClose}
+      title="IBAN Paylaş"
+      subtitle={`${vehicle.plate} için havale bilgisi`}
+    >
+      {loading ? (
+        <View className="items-center py-6">
+          <ActivityIndicator color={colors.primary} />
+        </View>
+      ) : (
+        <>
+          {info?.bankIban ? (
+            <View className="mb-3 rounded-2xl bg-secondary px-4 py-3">
+              <Text className="text-sm font-bold text-foreground">
+                {info.accountHolder?.trim() || info.shopName}
+              </Text>
+              {info.accountHolder?.trim() && info.shopName ? (
+                <Text className="mt-0.5 text-xs text-muted-foreground">{info.shopName}</Text>
+              ) : null}
+              <Text className="mt-1 font-mono text-sm text-foreground">{info.bankIban}</Text>
+              {info.bankName ? (
+                <Text className="mt-1 text-xs text-muted-foreground">{info.bankName}</Text>
+              ) : null}
+              <Text className="mt-2 text-sm font-extrabold text-foreground">
+                {formatCurrency(amount)}
+              </Text>
+            </View>
+          ) : (
+            <Text className="mb-3 text-sm text-muted-foreground">
+              Bu servis için IBAN tanımlı değil. Anasayfadan “IBAN Ekle” ile kaydedin.
+            </Text>
+          )}
+          <SheetActionList
+            onClose={onClose}
+            actions={[
+              {
+                key: 'whatsapp',
+                label: "WhatsApp'tan Paylaş",
+                description: 'Müşteriye IBAN mesajı gönder',
+                icon: MessageCircle,
+                tone: 'accent',
+                onPress: () => {
+                  void shareWhatsApp()
+                },
+              },
+              {
+                key: 'share',
+                label: 'Sistem Paylaşımı',
+                description: 'Diğer uygulamalarla gönder',
+                icon: Share2,
+                tone: 'primary',
+                onPress: () => {
+                  void shareText()
+                },
+              },
+            ]}
+          />
+        </>
+      )}
+    </AppSheet>
+  )
 }
 
 function AssignmentModal({
@@ -608,11 +1896,12 @@ function AssignmentModal({
   const [selectedId, setSelectedId] = useState(currentUser?.id ?? '')
   const [manualName, setManualName] = useState('')
 
-  function handleShow() {
+  useEffect(() => {
+    if (!visible) return
     setMode('list')
     setSelectedId(currentUser?.id ?? '')
     setManualName('')
-  }
+  }, [visible, currentUser?.id])
 
   function confirm() {
     if (mode === 'manual') {
@@ -625,106 +1914,97 @@ function AssignmentModal({
   }
 
   return (
-    <Modal
+    <AppSheet
       visible={visible}
-      transparent
-      animationType="fade"
-      onShow={handleShow}
-      onRequestClose={onCancel}
+      onClose={onCancel}
+      title="İşi Kim Yapıyor?"
+      subtitle="İşleme başlamadan önce sorumlu personeli seçin."
     >
-      <Pressable onPress={onCancel} className="flex-1 justify-end bg-black/40">
-        <Pressable onPress={() => {}} className="rounded-t-3xl bg-card p-4 pb-8">
-          <Text className="px-2 pb-1 pt-1 text-base font-extrabold text-foreground">
-            İşi Kim Yapıyor?
+      <View className="flex-row gap-1 rounded-2xl bg-secondary p-1">
+        <Pressable
+          onPress={() => setMode('list')}
+          className={cn('flex-1 rounded-xl py-2.5', mode === 'list' && 'bg-card')}
+          style={mode === 'list' ? cardShadow : undefined}
+        >
+          <Text
+            className={cn(
+              'text-center text-sm font-bold',
+              mode === 'list' ? 'text-foreground' : 'text-muted-foreground',
+            )}
+          >
+            Personelden Seç
           </Text>
-          <Text className="px-2 pb-3 text-xs text-muted-foreground">
-            İşleme başlamadan önce sorumlu personeli seçin.
-          </Text>
-
-          <View className="flex-row gap-1 rounded-2xl bg-secondary p-1">
-            <Pressable
-              onPress={() => setMode('list')}
-              className={cn('flex-1 rounded-xl py-2.5', mode === 'list' && 'bg-card')}
-              style={mode === 'list' ? cardShadow : undefined}
-            >
-              <Text
-                className={cn(
-                  'text-center text-sm font-bold',
-                  mode === 'list' ? 'text-foreground' : 'text-muted-foreground',
-                )}
-              >
-                Personelden Seç
-              </Text>
-            </Pressable>
-            <Pressable
-              onPress={() => setMode('manual')}
-              className={cn('flex-1 rounded-xl py-2.5', mode === 'manual' && 'bg-card')}
-              style={mode === 'manual' ? cardShadow : undefined}
-            >
-              <Text
-                className={cn(
-                  'text-center text-sm font-bold',
-                  mode === 'manual' ? 'text-foreground' : 'text-muted-foreground',
-                )}
-              >
-                Manuel Giriş
-              </Text>
-            </Pressable>
-          </View>
-
-          {mode === 'list' ? (
-            <ScrollView className="mt-3 max-h-72">
-              {staff.length === 0 ? (
-                <Text className="px-2 py-4 text-sm text-muted-foreground">
-                  Kayıtlı personel bulunamadı.
-                </Text>
-              ) : (
-                staff.map((member) => {
-                  const active = member.id === selectedId
-                  return (
-                    <Pressable
-                      key={member.id}
-                      onPress={() => setSelectedId(member.id)}
-                      className="flex-row items-center justify-between rounded-xl px-3 py-3.5"
-                    >
-                      <View>
-                        <Text
-                          className={cn(
-                            'text-base font-semibold',
-                            active ? 'text-primary' : 'text-foreground',
-                          )}
-                        >
-                          {member.fullName}
-                          {member.id === currentUser?.id ? ' (Ben)' : ''}
-                        </Text>
-                        <Text className="text-xs text-muted-foreground">
-                          {STAFF_ROLE_LABELS[member.role] ?? member.role}
-                        </Text>
-                      </View>
-                      {active && <Check size={20} color={colors.primary} strokeWidth={2.5} />}
-                    </Pressable>
-                  )
-                })
-              )}
-            </ScrollView>
-          ) : (
-            <View className="mt-3">
-              <TextField
-                label="Ad Soyad"
-                value={manualName}
-                onChange={setManualName}
-                placeholder="Örn: Kemal Usta"
-              />
-            </View>
-          )}
-
-          <View className="mt-4 flex-row gap-2">
-            <SaveButton onPress={confirm} />
-            <CancelButton onPress={onCancel} />
-          </View>
         </Pressable>
-      </Pressable>
-    </Modal>
+        <Pressable
+          onPress={() => setMode('manual')}
+          className={cn('flex-1 rounded-xl py-2.5', mode === 'manual' && 'bg-card')}
+          style={mode === 'manual' ? cardShadow : undefined}
+        >
+          <Text
+            className={cn(
+              'text-center text-sm font-bold',
+              mode === 'manual' ? 'text-foreground' : 'text-muted-foreground',
+            )}
+          >
+            Manuel Giriş
+          </Text>
+        </Pressable>
+      </View>
+
+      {mode === 'list' ? (
+        <ScrollView className="mt-3 max-h-72">
+          {staff.length === 0 ? (
+            <Text className="px-2 py-4 text-sm text-muted-foreground">
+              Kayıtlı personel bulunamadı.
+            </Text>
+          ) : (
+            staff.map((member) => {
+              const active = member.id === selectedId
+              return (
+                <Pressable
+                  key={member.id}
+                  onPress={() => setSelectedId(member.id)}
+                  className={cn(
+                    'mt-1 flex-row items-center justify-between rounded-2xl border px-3 py-3.5',
+                    active ? 'border-primary/40 bg-primary/5' : 'border-transparent',
+                  )}
+                >
+                  <View>
+                    <Text
+                      className={cn(
+                        'text-base font-semibold',
+                        active ? 'text-primary' : 'text-foreground',
+                      )}
+                    >
+                      {member.fullName}
+                      {member.id === currentUser?.id ? ' (Ben)' : ''}
+                    </Text>
+                    <Text className="text-xs text-muted-foreground">
+                      {STAFF_ROLE_LABELS[member.role] ?? member.role}
+                    </Text>
+                  </View>
+                  {active && <Check size={20} color={colors.primary} strokeWidth={2.5} />}
+                </Pressable>
+              )
+            })
+          )}
+        </ScrollView>
+      ) : (
+        <View className="mt-3">
+          <TextField
+            label="Ad Soyad"
+            value={manualName}
+            onChange={setManualName}
+            placeholder="Örn: Kemal Usta"
+          />
+        </View>
+      )}
+
+      <View className="mt-4 flex-row gap-2">
+        <SaveButton onPress={confirm} />
+        <CancelButton onPress={onCancel} />
+      </View>
+    </AppSheet>
   )
 }
 
@@ -809,40 +2089,64 @@ function InfoTab({ vehicle }: { vehicle: Vehicle }) {
   )
 }
 
+const COMPLAINT_CATEGORY_OPTIONS = COMPLAINT_CATEGORY_ORDER.map((value) => ({
+  value,
+  label: COMPLAINT_CATEGORY_LABELS[value],
+}))
+
+function groupComplaintsByCategory(complaints: Complaint[]) {
+  const map = new Map<ComplaintCategory, Complaint[]>()
+  for (const c of complaints) {
+    const key = c.category || 'diger'
+    const list = map.get(key)
+    if (list) list.push(c)
+    else map.set(key, [c])
+  }
+  return COMPLAINT_CATEGORY_ORDER.filter((k) => map.has(k)).map((category) => ({
+    category,
+    label: COMPLAINT_CATEGORY_LABELS[category],
+    items: map.get(category)!,
+  }))
+}
+
 function ComplaintTab({
   vehicle,
   onAdd,
   onUpdate,
 }: {
   vehicle: Vehicle
-  onAdd: (text: string) => void
-  onUpdate: (complaintId: string, text: string) => void
+  onAdd: (text: string, category: ComplaintCategory) => Promise<string | undefined>
+  onUpdate: (complaintId: string, text: string, category: ComplaintCategory) => void
 }) {
   const [open, setOpen] = useState(false)
   const [text, setText] = useState('')
+  const [category, setCategory] = useState<ComplaintCategory>('diger')
   const [photoUri, setPhotoUri] = useState<string | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editText, setEditText] = useState('')
+  const [editCategory, setEditCategory] = useState<ComplaintCategory>('diger')
+  const [photosVersion, setPhotosVersion] = useState(0)
 
-  function save() {
+  async function save() {
     if (!text.trim()) {
       Alert.alert('Eksik Bilgi', 'Lütfen şikayet alanını doldurun.')
       return
     }
-    onAdd(text.trim())
-    if (photoUri) {
-      uploadWorkOrderImage(vehicle.workOrderId, photoUri, 'hasar').catch(() => {
-        /* fotoğraf yüklenemedi — şikayet zaten kaydedildi, kullanıcıyı bloklamayalım */
-      })
-    }
+    const newComplaintId = await onAdd(text.trim(), category)
+    const uploaded = await attachPhotoAfterSave(vehicle.workOrderId, photoUri, 'hasar', {
+      complaintId: newComplaintId,
+    })
+    if (uploaded && photoUri) setPhotosVersion((v) => v + 1)
     setText('')
+    setCategory('diger')
     setPhotoUri(null)
     setOpen(false)
   }
 
-  function startEdit(c: { id: string; text: string }) {
+  function startEdit(c: Complaint) {
     setEditingId(c.id)
     setEditText(c.text)
+    setEditCategory(c.category || 'diger')
   }
 
   function saveEdit() {
@@ -850,78 +2154,139 @@ function ComplaintTab({
       Alert.alert('Eksik Bilgi', 'Lütfen şikayet alanını doldurun.')
       return
     }
-    if (editingId) onUpdate(editingId, editText.trim())
+    if (editingId) onUpdate(editingId, editText.trim(), editCategory)
     setEditingId(null)
     setEditText('')
+    setEditCategory('diger')
   }
+
+  const groups = groupComplaintsByCategory(vehicle.complaints)
 
   return (
     <View className="flex flex-col gap-3">
       {vehicle.complaints.length === 0 && !open && (
-        <EmptyState icon={MessageSquareWarning} text="Henüz şikayet eklenmedi." />
+        <EmptyState icon={MessageSquareWarning} text="Henüz şikayet / istek eklenmedi." />
       )}
 
-      {vehicle.complaints.map((c) =>
-        editingId === c.id ? (
-          <View
-            key={c.id}
-            className="rounded-2xl border-2 border-primary/30 bg-card p-4"
-            style={cardShadow}
-          >
-            <TextArea label="Şikayeti Düzenle" value={editText} onChange={setEditText} rows={4} />
-            <View className="mt-3 flex-row gap-2">
-              <SaveButton onPress={saveEdit} />
-              <CancelButton onPress={() => setEditingId(null)} />
-            </View>
+      {groups.map((g) => (
+        <View key={g.category} className="gap-2">
+          <View className="flex-row items-center justify-between px-0.5">
+            <Text className="text-xs font-extrabold uppercase tracking-wide text-muted-foreground">
+              {g.label}
+            </Text>
+            <Text className="text-xs font-semibold text-muted-foreground">
+              {g.items.length} kayıt
+            </Text>
           </View>
-        ) : (
-          <View
-            key={c.id}
-            className="rounded-2xl border border-border bg-card p-4"
-            style={cardShadow}
-          >
-            <View className="flex-row items-start gap-3">
-              <View className="mt-0.5 h-8 w-8 items-center justify-center rounded-lg bg-accent/15">
-                <MessageSquareWarning size={16} color={colors.accent} />
-              </View>
-              <View className="flex-1">
-                <Text className="text-sm font-medium leading-relaxed text-foreground">
-                  {c.text}
-                </Text>
-                <Text className="mt-1 text-xs text-muted-foreground">
-                  {formatTime(c.createdAt)}
-                </Text>
-              </View>
-              <Pressable
-                onPress={() => startEdit(c)}
-                className="h-9 w-9 items-center justify-center rounded-lg bg-secondary"
+          {g.items.map((c) =>
+            editingId === c.id ? (
+              <View
+                key={c.id}
+                className="rounded-2xl border-2 border-primary/30 bg-card p-4"
+                style={cardShadow}
               >
-                <Pencil size={14} color={colors.secondaryForeground} />
-              </Pressable>
-            </View>
-          </View>
-        ),
-      )}
+                <SelectField
+                  label="Kategori"
+                  value={editCategory}
+                  onChange={(v) => setEditCategory(v as ComplaintCategory)}
+                  options={COMPLAINT_CATEGORY_OPTIONS}
+                />
+                <View className="mt-3">
+                  <TextArea
+                    label="Şikayet / İstek"
+                    value={editText}
+                    onChange={setEditText}
+                    rows={4}
+                  />
+                </View>
+                <View className="mt-3 flex-row gap-2">
+                  <SaveButton onPress={saveEdit} />
+                  <CancelButton onPress={() => setEditingId(null)} />
+                </View>
+              </View>
+            ) : (
+              <View
+                key={c.id}
+                className="rounded-2xl border border-border bg-card p-4"
+                style={cardShadow}
+              >
+                <View className="flex-row items-start gap-3">
+                  <View className="mt-0.5 h-8 w-8 items-center justify-center rounded-lg bg-accent/15">
+                    <MessageSquareWarning size={16} color={colors.accent} />
+                  </View>
+                  <View className="flex-1">
+                    <Text className="text-[11px] font-bold uppercase tracking-wide text-accent">
+                      {COMPLAINT_CATEGORY_LABELS[c.category] ?? 'Diğer'}
+                    </Text>
+                    <Text className="mt-1 text-sm font-medium leading-relaxed text-foreground">
+                      {c.text}
+                    </Text>
+                    <Text className="mt-1 text-xs text-muted-foreground">
+                      {formatDateTime(c.createdAt)}
+                    </Text>
+                  </View>
+                  <Pressable
+                    onPress={() => startEdit(c)}
+                    className="h-9 w-9 items-center justify-center rounded-lg bg-secondary"
+                  >
+                    <Pencil size={14} color={colors.secondaryForeground} />
+                  </Pressable>
+                </View>
+                <View className="mt-3">
+                  <PhotoGallery
+                    workOrderId={vehicle.workOrderId}
+                    imageType="hasar"
+                    complaintId={c.id}
+                    refreshKey={photosVersion}
+                  />
+                </View>
+              </View>
+            ),
+          )}
+        </View>
+      ))}
 
-      <PhotoGallery workOrderId={vehicle.workOrderId} imageType="hasar" />
+      <PhotoGallery
+        workOrderId={vehicle.workOrderId}
+        imageType="hasar"
+        heading="Diğer Fotoğraflar"
+        refreshKey={photosVersion}
+      />
 
       {open ? (
         <View className="rounded-2xl border border-border bg-card p-4" style={cardShadow}>
-          <TextArea
-            label="Yeni Şikayet"
-            value={text}
-            onChange={setText}
-            rows={4}
-            placeholder="Müşterinin belirttiği arıza..."
+          <SelectField
+            label="Kategori"
+            value={category}
+            onChange={(v) => setCategory(v as ComplaintCategory)}
+            options={COMPLAINT_CATEGORY_OPTIONS}
           />
+          <View className="mt-3">
+            <TextArea
+              label="Yeni Şikayet / İstek"
+              value={text}
+              onChange={setText}
+              rows={4}
+              placeholder="Müşterinin belirttiği arıza veya talebi..."
+            />
+          </View>
           <PhotoPicker uri={photoUri} onPick={setPhotoUri} onClear={() => setPhotoUri(null)} />
           <View className="mt-3 flex-row gap-2">
-            <SaveButton onPress={save} />
-            <CancelButton onPress={() => setOpen(false)} />
+            <SaveButton onPress={() => void save()} />
+            <CancelButton
+              onPress={() => {
+                setOpen(false)
+                setText('')
+                setCategory('diger')
+                setPhotoUri(null)
+              }}
+            />
           </View>
         </View>
       ) : (
-        <AddButton label="Şikayet Ekle" onPress={() => setOpen(true)} />
+        editingId === null && (
+          <AddButton label="Şikayet / İstek Ekle" onPress={() => setOpen(true)} />
+        )
       )}
     </View>
   )
@@ -936,7 +2301,7 @@ function ServiceTab({
 }: {
   vehicle: Vehicle
   catalog: ServiceCatalogItem[]
-  onAdd: (s: Omit<ServiceItem, 'id'>, force?: boolean) => Promise<void>
+  onAdd: (s: Omit<ServiceItem, 'id'>, force?: boolean) => Promise<string | undefined>
   onUpdate: (id: string, s: Omit<ServiceItem, 'id'>) => void
   onDelete: (id: string) => void
 }) {
@@ -945,10 +2310,13 @@ function ServiceTab({
   const [confirmId, setConfirmId] = useState<string | null>(null)
   const [title, setTitle] = useState('')
   const [price, setPrice] = useState('')
+  const [photoUri, setPhotoUri] = useState<string | null>(null)
+  const [photosVersion, setPhotosVersion] = useState(0)
 
   function reset() {
     setTitle('')
     setPrice('')
+    setPhotoUri(null)
     setOpen(false)
     setEditingId(null)
   }
@@ -957,6 +2325,7 @@ function ServiceTab({
     setEditingId(null)
     setTitle('')
     setPrice('')
+    setPhotoUri(null)
     setOpen(true)
   }
 
@@ -973,7 +2342,12 @@ function ServiceTab({
       if (editingId) {
         onUpdate(editingId, data)
       } else {
-        await onAdd(data, force)
+        const pendingPhoto = photoUri
+        const newServiceId = await onAdd(data, force)
+        const uploaded = await attachPhotoAfterSave(vehicle.workOrderId, pendingPhoto, 'diger', {
+          serviceId: newServiceId,
+        })
+        if (uploaded && pendingPhoto) setPhotosVersion((v) => v + 1)
       }
       reset()
     } catch (e) {
@@ -1015,6 +2389,7 @@ function ServiceTab({
       />
       <TextField label="Yapılan İşlem" value={title} onChange={setTitle} placeholder="Örn: Yağ değişimi" />
       <TextField label="İşçilik Ücreti (₺)" value={price} onChange={setPrice} inputMode="numeric" placeholder="0" />
+      <PhotoPicker uri={photoUri} onPick={setPhotoUri} onClear={() => setPhotoUri(null)} />
     </>
   )
 
@@ -1041,9 +2416,24 @@ function ServiceTab({
               setConfirmId(null)
             }}
             onCancelDelete={() => setConfirmId(null)}
+            footer={
+              <PhotoGallery
+                workOrderId={vehicle.workOrderId}
+                imageType="diger"
+                serviceId={s.id}
+                refreshKey={photosVersion}
+              />
+            }
           />
         ),
       )}
+
+      <PhotoGallery
+        workOrderId={vehicle.workOrderId}
+        imageType="diger"
+        heading="Diğer Fotoğraflar"
+        refreshKey={photosVersion}
+      />
 
       {open ? (
         <ItemForm onSave={save} onCancel={reset} fields={fields} />
@@ -1052,6 +2442,16 @@ function ServiceTab({
       )}
     </View>
   )
+}
+
+type PdfEditLine = InvoiceScanLine & {
+  id: string
+  selected: boolean
+  salePrice: number
+}
+
+function newPdfLineId() {
+  return Math.random().toString(36).slice(2, 10)
 }
 
 function ProductTab({
@@ -1063,7 +2463,7 @@ function ProductTab({
 }: {
   vehicle: Vehicle
   onAdd: (p: Omit<ProductItem, 'id'>, force?: boolean) => Promise<void>
-  onUpdate: (id: string, p: Omit<ProductItem, 'id'>) => void
+  onUpdate: (id: string, p: Omit<ProductItem, 'id'>) => void | Promise<void>
   onDelete: (id: string) => void
   onReturnToSupplier: (id: string) => void
 }) {
@@ -1079,8 +2479,19 @@ function ProductTab({
   const [supplierId, setSupplierId] = useState<string | undefined>(undefined)
   const [supplierName, setSupplierName] = useState('')
   const [purchasePrice, setPurchasePrice] = useState('')
-  const [purchasePriceTouched, setPurchasePriceTouched] = useState(false)
+  /** Satış (birim fiyat) elle değiştirildiyse alış ile senkron kesilir. */
+  const [saleTouched, setSaleTouched] = useState(false)
   const [photoUri, setPhotoUri] = useState<string | null>(null)
+  const [photosVersion, setPhotosVersion] = useState(0)
+  const [pdfScanning, setPdfScanning] = useState(false)
+  const [pdfSaving, setPdfSaving] = useState(false)
+  const [pdfOpen, setPdfOpen] = useState(false)
+  const [pdfLines, setPdfLines] = useState<PdfEditLine[]>([])
+  const [paySupplier, setPaySupplier] = useState<{
+    id: string
+    name: string
+    suggestAmount: number
+  } | null>(null)
 
   function reset() {
     setName('')
@@ -1091,7 +2502,7 @@ function ProductTab({
     setSupplierId(undefined)
     setSupplierName('')
     setPurchasePrice('')
-    setPurchasePriceTouched(false)
+    setSaleTouched(false)
     setPhotoUri(null)
     setOpen(false)
     setEditingId(null)
@@ -1107,7 +2518,7 @@ function ProductTab({
     setSupplierId(undefined)
     setSupplierName('')
     setPurchasePrice('')
-    setPurchasePriceTouched(false)
+    setSaleTouched(false)
     setPhotoUri(null)
     setOpen(true)
   }
@@ -1123,12 +2534,20 @@ function ProductTab({
     setSupplierId(p.supplierId)
     setSupplierName(p.supplierName ?? '')
     setPurchasePrice(p.purchasePrice != null ? String(p.purchasePrice) : String(p.price))
-    setPurchasePriceTouched(true)
+    setSaleTouched(
+      p.purchasePrice != null && Number(p.purchasePrice) !== Number(p.price),
+    )
+  }
+
+  /** Alış değişince satış henüz elle değiştirilmediyse aynı kalır (stok PDF akışı gibi). */
+  function handlePurchaseChange(v: string) {
+    setPurchasePrice(v)
+    if (!saleTouched) setPrice(v)
   }
 
   function handlePriceChange(v: string) {
     setPrice(v)
-    if (!purchasePriceTouched) setPurchasePrice(v)
+    if (source === 'disaridan') setSaleTouched(true)
   }
 
   function handleNameChange(v: string) {
@@ -1136,7 +2555,95 @@ function ProductTab({
     if (stockProductId) setStockProductId(undefined)
   }
 
+  async function pickAndScanPdf() {
+    if (!supplierId) {
+      Alert.alert('Tedarikçi', 'Önce tedarikçi seçin.')
+      return
+    }
+    try {
+      const picked = await DocumentPicker.getDocumentAsync({
+        type: 'application/pdf',
+        copyToCacheDirectory: true,
+        multiple: false,
+      })
+      if (picked.canceled || !picked.assets?.[0]) return
+
+      setPdfScanning(true)
+      const asset = picked.assets[0]
+      const base64 = await readAsStringAsync(asset.uri, { encoding: EncodingType.Base64 })
+      const result = await scanInvoiceApi(base64, asset.mimeType ?? 'application/pdf')
+      if (!result.lines.length) {
+        Alert.alert('PDF', 'PDF’den ürün satırı okunamadı.')
+        return
+      }
+      setPdfLines(
+        result.lines.map((l) => ({
+          ...l,
+          id: newPdfLineId(),
+          selected: true,
+          salePrice: l.unitPrice,
+        })),
+      )
+      setPdfOpen(true)
+    } catch (e) {
+      showError(e)
+    } finally {
+      setPdfScanning(false)
+    }
+  }
+
+  function updatePdfLine(id: string, patch: Partial<PdfEditLine>) {
+    setPdfLines((prev) => prev.map((l) => (l.id === id ? { ...l, ...patch } : l)))
+  }
+
+  async function savePdfLines(force = false) {
+    if (!supplierId) return
+    const toSave = pdfLines.filter((l) => l.selected && l.name.trim().length >= 2)
+    if (toSave.length === 0) {
+      Alert.alert('Satır yok', 'En az bir ürün seçin / ad girin.')
+      return
+    }
+    setPdfSaving(true)
+    try {
+      for (const l of toSave) {
+        const unit = Number(l.unitPrice) || 0
+        const sale = l.salePrice > 0 ? Number(l.salePrice) : unit
+        await onAdd(
+          {
+            name: l.name.trim(),
+            quantity: Math.max(1, l.quantity),
+            price: sale,
+            source: 'disaridan',
+            supplierId,
+            supplierName: supplierName || undefined,
+            purchasePrice: unit,
+          },
+          force,
+        )
+      }
+      setPdfOpen(false)
+      setPdfLines([])
+      reset()
+      Alert.alert('Eklendi', `${toSave.length} ürün iş emrine eklendi.`)
+    } catch (e) {
+      if (!force && e instanceof WorkOrderCompletedError) {
+        Alert.alert('Bu iş tamamlandı', 'Bu işe ürün eklemek istediğinize emin misiniz?', [
+          { text: 'İptal', style: 'cancel' },
+          { text: 'Evet, Ekle', onPress: () => void savePdfLines(true) },
+        ])
+      } else {
+        showError(e)
+      }
+    } finally {
+      setPdfSaving(false)
+    }
+  }
+
   async function commit(priceNum: number, force = false) {
+    const purchaseNum =
+      source === 'disaridan'
+        ? Number(purchasePrice) || priceNum
+        : undefined
     const data: Omit<ProductItem, 'id'> = {
       name: name.trim(),
       quantity: Number(qty) || 1,
@@ -1145,18 +2652,16 @@ function ProductTab({
       stockProductId: source === 'stok' ? stockProductId : undefined,
       supplierId: source === 'disaridan' ? supplierId : undefined,
       supplierName: source === 'disaridan' ? supplierName : undefined,
-      purchasePrice: source === 'disaridan' ? Number(purchasePrice) || 0 : undefined,
+      purchasePrice: purchaseNum,
     }
     try {
       if (editingId) {
-        onUpdate(editingId, data)
+        await onUpdate(editingId, data)
       } else {
+        const pendingPhoto = photoUri
         await onAdd(data, force)
-        if (photoUri) {
-          uploadWorkOrderImage(vehicle.workOrderId, photoUri, 'arac').catch(() => {
-            /* fotoğraf yüklenemedi — parça zaten kaydedildi */
-          })
-        }
+        const uploaded = await attachPhotoAfterSave(vehicle.workOrderId, pendingPhoto, 'arac')
+        if (uploaded && pendingPhoto) setPhotosVersion((v) => v + 1)
       }
       reset()
     } catch (e) {
@@ -1194,7 +2699,10 @@ function ProductTab({
     <>
       <View className="flex-row gap-1 rounded-2xl bg-secondary p-1">
         <Pressable
-          onPress={() => setSource('stok')}
+          onPress={() => {
+            setSource('stok')
+            setSaleTouched(false)
+          }}
           className={cn('flex-1 rounded-xl py-2.5', source === 'stok' && 'bg-card')}
           style={source === 'stok' ? cardShadow : undefined}
         >
@@ -1208,7 +2716,12 @@ function ProductTab({
           </Text>
         </Pressable>
         <Pressable
-          onPress={() => setSource('disaridan')}
+          onPress={() => {
+            setSource('disaridan')
+            setSaleTouched(false)
+            if (purchasePrice === '' && price) setPurchasePrice(price)
+            if (price === '' && purchasePrice) setPrice(purchasePrice)
+          }}
           className={cn('flex-1 rounded-xl py-2.5', source === 'disaridan' && 'bg-card')}
           style={source === 'disaridan' ? cardShadow : undefined}
         >
@@ -1223,28 +2736,27 @@ function ProductTab({
         </Pressable>
       </View>
 
+      {source === 'disaridan' ? (
+        <View className="rounded-xl border border-accent/30 bg-accent/10 px-3 py-2.5">
+          <Text className="text-xs font-bold text-accent">İki ayrı para akışı</Text>
+          <Text className="mt-1 text-[11px] leading-4 text-muted-foreground">
+            · Alış → tedarikçi carisine borç yazılır (siz tedarikçiye ödersiniz).{'\n'}
+            · Satış → müşteri iş emri tutarına eklenir (müşteriden tahsil edersiniz).
+          </Text>
+        </View>
+      ) : null}
+
       {source === 'stok' && (
         <StockCatalogPicker
           onPick={(s) => {
             setName(s.name)
             setPrice(String(s.price))
-            if (!purchasePriceTouched) setPurchasePrice(String(s.price))
+            setPurchasePrice(String(s.purchasePrice ?? s.price))
+            setSaleTouched(false)
             setStockProductId(s.id)
           }}
         />
       )}
-
-      <TextField
-        label="Ürün / Parça Adı"
-        value={name}
-        onChange={handleNameChange}
-        placeholder="Örn: Motor yağı 5W-30"
-        required
-      />
-      <View className="flex-row gap-3">
-        <TextField label="Adet" value={qty} onChange={setQty} inputMode="numeric" placeholder="1" className="flex-1" />
-        <TextField label="Birim Fiyat (₺)" value={price} onChange={handlePriceChange} inputMode="numeric" placeholder="0" className="flex-1" />
-      </View>
 
       {source === 'disaridan' && (
         <>
@@ -1260,16 +2772,91 @@ function ProductTab({
               setSupplierName('')
             }}
           />
+          {getCachedEntitlements()?.features.aiInvoice ? (
+            <>
+              <Pressable
+                onPress={() => void pickAndScanPdf()}
+                disabled={pdfScanning || !supplierId}
+                className={cn(
+                  'h-12 flex-row items-center justify-center gap-2 rounded-xl border border-primary/30 bg-primary/10',
+                  (!supplierId || pdfScanning) && 'opacity-50',
+                )}
+              >
+                {pdfScanning ? (
+                  <ActivityIndicator color={colors.primary} />
+                ) : (
+                  <>
+                    <FileText size={18} color={colors.primary} />
+                    <Text className="text-sm font-extrabold text-primary">PDF’den Ekle</Text>
+                  </>
+                )}
+              </Pressable>
+              {!supplierId ? (
+                <Text className="text-xs text-muted-foreground">
+                  PDF okumak için önce tedarikçi seçin.
+                </Text>
+              ) : null}
+            </>
+          ) : (
+            <Text className="text-xs text-muted-foreground">
+              AI ürün / fatura okuma yalnızca Kurumsal pakette vardır.
+            </Text>
+          )}
+        </>
+      )}
+
+      <TextField
+        label="Ürün / Parça Adı"
+        value={name}
+        onChange={handleNameChange}
+        placeholder="Örn: Motor yağı 5W-30"
+        required
+      />
+      <View className="flex-row gap-3">
+        <TextField
+          label="Adet"
+          value={qty}
+          onChange={setQty}
+          inputMode="numeric"
+          placeholder="1"
+          className="flex-1"
+        />
+        {source === 'disaridan' ? (
           <TextField
-            label="Alış Fiyatı (₺)"
+            label="Alış (tedarikçiye) ₺"
             value={purchasePrice}
-            onChange={(v) => {
-              setPurchasePrice(v)
-              setPurchasePriceTouched(true)
-            }}
+            onChange={handlePurchaseChange}
             inputMode="numeric"
             placeholder="0"
+            className="flex-1"
           />
+        ) : (
+          <TextField
+            label="Birim Fiyat (₺)"
+            value={price}
+            onChange={handlePriceChange}
+            inputMode="numeric"
+            placeholder="0"
+            className="flex-1"
+          />
+        )}
+      </View>
+      {source === 'disaridan' && (
+        <>
+          <TextField
+            label="Satış (müşteriye) ₺"
+            value={price}
+            onChange={handlePriceChange}
+            inputMode="numeric"
+            placeholder="Alış ile aynı (değiştirilebilir)"
+          />
+          {!!purchasePrice && !!qty && (
+            <Text className="text-[11px] text-muted-foreground">
+              Cariye borç: {formatCurrency((Number(purchasePrice) || 0) * (Number(qty) || 1))} ·
+              Müşteriye satış:{' '}
+              {formatCurrency((Number(price) || 0) * (Number(qty) || 1))}
+            </Text>
+          )}
         </>
       )}
 
@@ -1305,18 +2892,258 @@ function ProductTab({
               setReturnConfirmId(null)
             }}
             onCancelReturn={() => setReturnConfirmId(null)}
+            onPaySupplier={
+              p.source === 'disaridan' && p.supplierId && !p.returnedAt
+                ? () =>
+                    setPaySupplier({
+                      id: p.supplierId!,
+                      name: p.supplierName ?? 'Tedarikçi',
+                      suggestAmount: (p.purchasePrice ?? 0) * p.quantity,
+                    })
+                : undefined
+            }
           />
         ),
       )}
 
-      <PhotoGallery workOrderId={vehicle.workOrderId} imageType="arac" />
+      <PhotoGallery
+        workOrderId={vehicle.workOrderId}
+        imageType="arac"
+        refreshKey={photosVersion}
+      />
 
       {open ? (
         <ItemForm onSave={save} onCancel={reset} fields={formFields} disabled={!canSave} />
       ) : (
         editingId === null && <AddButton label="Ürün Ekle" onPress={startAdd} />
       )}
+
+      <AppSheet
+        visible={pdfOpen}
+        onClose={() => !pdfSaving && setPdfOpen(false)}
+        title="PDF’den ürün ekle"
+        subtitle={
+          supplierName
+            ? `${supplierName} · seçili satırlar iş emrine ve cariye yazılır`
+            : 'Seçili satırlar iş emrine eklenir'
+        }
+      >
+        <ScrollView style={{ maxHeight: 440 }} keyboardShouldPersistTaps="handled">
+          <View className="gap-3">
+            {pdfLines.map((l, index) => (
+              <View
+                key={l.id}
+                className="rounded-2xl border border-border bg-secondary/40 px-3 py-3"
+              >
+                <Pressable
+                  onPress={() => updatePdfLine(l.id, { selected: !l.selected })}
+                  className="mb-2 flex-row items-center gap-2"
+                >
+                  <View
+                    className={cn(
+                      'h-5 w-5 items-center justify-center rounded border',
+                      l.selected ? 'border-primary bg-primary' : 'border-border bg-card',
+                    )}
+                  >
+                    {l.selected && (
+                      <Check size={12} color={colors.primaryForeground} strokeWidth={3} />
+                    )}
+                  </View>
+                  <Text className="text-sm font-bold text-foreground">Satır {index + 1}</Text>
+                </Pressable>
+                <TextField
+                  label="Ürün adı"
+                  value={l.name}
+                  onChange={(v) => updatePdfLine(l.id, { name: v })}
+                  placeholder="Parça adı"
+                />
+                <View className="mt-2 flex-row gap-2">
+                  <TextField
+                    label="Adet"
+                    value={String(l.quantity)}
+                    onChange={(v) =>
+                      updatePdfLine(l.id, {
+                        quantity: Math.max(1, parseInt(v.replace(/\D/g, ''), 10) || 1),
+                      })
+                    }
+                    inputMode="numeric"
+                    className="flex-1"
+                  />
+                  <TextField
+                    label="Alış"
+                    value={l.unitPrice ? String(l.unitPrice) : ''}
+                    onChange={(v) => {
+                      const unitPrice = Number(v.replace(',', '.')) || 0
+                      updatePdfLine(l.id, {
+                        unitPrice,
+                        salePrice:
+                          l.salePrice === 0 || l.salePrice === l.unitPrice
+                            ? unitPrice
+                            : l.salePrice,
+                      })
+                    }}
+                    inputMode="numeric"
+                    className="flex-1"
+                  />
+                  <TextField
+                    label="Satış"
+                    value={l.salePrice ? String(l.salePrice) : ''}
+                    onChange={(v) =>
+                      updatePdfLine(l.id, { salePrice: Number(v.replace(',', '.')) || 0 })
+                    }
+                    inputMode="numeric"
+                    className="flex-1"
+                  />
+                </View>
+              </View>
+            ))}
+          </View>
+        </ScrollView>
+        <Pressable
+          onPress={() => void savePdfLines()}
+          disabled={pdfSaving}
+          className="mt-4 h-12 items-center justify-center rounded-xl bg-primary active:opacity-90"
+        >
+          {pdfSaving ? (
+            <ActivityIndicator color={colors.primaryForeground} />
+          ) : (
+            <Text className="text-sm font-extrabold text-primary-foreground">
+              Seçilenleri Ekle
+            </Text>
+          )}
+        </Pressable>
+        <SheetCancelButton onPress={() => setPdfOpen(false)} />
+      </AppSheet>
+
+      <SupplierPayFromJobSheet
+        target={paySupplier}
+        onClose={() => setPaySupplier(null)}
+      />
     </View>
+  )
+}
+
+function SupplierPayFromJobSheet({
+  target,
+  onClose,
+}: {
+  target: { id: string; name: string; suggestAmount: number } | null
+  onClose: () => void
+}) {
+  const [amount, setAmount] = useState('')
+  const [method, setMethod] = useState<'nakit' | 'kart' | 'havale'>('nakit')
+  const [balance, setBalance] = useState<number | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    if (!target) return
+    setAmount(target.suggestAmount > 0 ? String(target.suggestAmount) : '')
+    setMethod('nakit')
+    setBusy(false)
+    setBalance(null)
+    getSupplierLedger(target.id)
+      .then((l) => setBalance(l.supplier.balance))
+      .catch(() => setBalance(null))
+  }, [target])
+
+  async function submit() {
+    if (!target) return
+    const value = Number(String(amount).replace(',', '.'))
+    if (!Number.isFinite(value) || value <= 0) {
+      Alert.alert('Geçersiz tutar', '0\'dan büyük bir tutar girin.')
+      return
+    }
+    setBusy(true)
+    try {
+      const ledger = await recordSupplierPayment(
+        target.id,
+        value,
+        `İş emri ödemesi · ${target.name}`,
+        method,
+      )
+      setBalance(ledger.supplier.balance)
+      Alert.alert(
+        'Tedarikçiye ödeme kaydedildi',
+        `Yeni bakiye: ${formatCurrency(ledger.supplier.balance)}`,
+      )
+      onClose()
+    } catch (e) {
+      showError(e)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <AppSheet
+      visible={!!target}
+      onClose={onClose}
+      title="Tedarikçiye ödeme"
+      subtitle={
+        target
+          ? `${target.name}${balance != null ? ` · Güncel borç ${formatCurrency(balance)}` : ''}`
+          : undefined
+      }
+    >
+      <View className="mb-3 rounded-xl border border-border bg-secondary/60 px-3 py-2.5">
+        <Text className="text-xs text-muted-foreground">
+          Bu ödeme tedarikçi carisini düşürür. Müşteriden aldığınız para ayrıdır — üstteki
+          “Müşteriden Tahsilat” ile kaydedilir.
+        </Text>
+      </View>
+      <TextField
+        label="Ödeme tutarı (₺)"
+        value={amount}
+        onChange={setAmount}
+        inputMode="numeric"
+        placeholder="0"
+      />
+      <Text className="mb-2 mt-3 text-xs font-bold uppercase tracking-wide text-muted-foreground">
+        Yöntem
+      </Text>
+      <View className="flex-row gap-2">
+        {(
+          [
+            { key: 'nakit' as const, label: 'Nakit' },
+            { key: 'kart' as const, label: 'Kart' },
+            { key: 'havale' as const, label: 'Havale' },
+          ] as const
+        ).map((m) => {
+          const active = method === m.key
+          return (
+            <Pressable
+              key={m.key}
+              onPress={() => setMethod(m.key)}
+              className={cn(
+                'h-11 flex-1 items-center justify-center rounded-xl border-2',
+                active ? 'border-primary bg-primary' : 'border-border bg-card',
+              )}
+            >
+              <Text
+                className={cn(
+                  'text-sm font-bold',
+                  active ? 'text-primary-foreground' : 'text-foreground',
+                )}
+              >
+                {m.label}
+              </Text>
+            </Pressable>
+          )
+        })}
+      </View>
+      <Pressable
+        onPress={() => void submit()}
+        disabled={busy}
+        className="mt-4 h-12 items-center justify-center rounded-xl bg-accent active:opacity-90"
+      >
+        {busy ? (
+          <ActivityIndicator color={colors.accentForeground} />
+        ) : (
+          <Text className="text-sm font-extrabold text-accent-foreground">Ödemeyi Kaydet</Text>
+        )}
+      </Pressable>
+      <SheetCancelButton onPress={onClose} />
+    </AppSheet>
   )
 }
 
@@ -1361,15 +3188,25 @@ function StockCatalogPicker({ onPick }: { onPick: (s: StockProductLite) => void 
         />
       </View>
       {!loading && !pickedName && results.length > 0 && (
-        <View className="flex flex-col gap-1.5">
-          {results.slice(0, 6).map((s) => (
+        <ScrollView
+          style={{ maxHeight: 168 }}
+          nestedScrollEnabled
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator
+          className="rounded-xl border border-border bg-card"
+          contentContainerStyle={{ gap: 0, paddingVertical: 2 }}
+        >
+          {results.slice(0, 30).map((s, idx) => (
             <Pressable
               key={s.id}
               onPress={() => {
                 onPick(s)
                 setPickedName(s.name)
               }}
-              className="flex-row items-center justify-between rounded-xl border border-border bg-card px-3 py-2.5 active:bg-primary/5"
+              className={cn(
+                'flex-row items-center justify-between px-3 py-2.5 active:bg-primary/5',
+                idx < Math.min(results.length, 30) - 1 && 'border-b border-border',
+              )}
             >
               <View className="min-w-0 flex-1 flex-row items-center gap-2">
                 <Package size={14} color={colors.mutedForeground} />
@@ -1382,7 +3219,7 @@ function StockCatalogPicker({ onPick }: { onPick: (s: StockProductLite) => void 
               </Text>
             </Pressable>
           ))}
-        </View>
+        </ScrollView>
       )}
       {!loading && query.trim().length > 0 && results.length === 0 && !pickedName && (
         <Text className="px-1 text-xs text-muted-foreground">
@@ -1451,7 +3288,7 @@ function SupplierPicker({
   if (quickAdd) {
     return (
       <View className="rounded-xl border border-border bg-card p-3">
-        <Text className="mb-2 text-xs font-bold text-muted-foreground">Yeni Cari Ekle</Text>
+        <Text className="mb-2 text-xs font-bold text-muted-foreground">Yeni Tedarikçi</Text>
         <View className="flex flex-col gap-2">
           <TextField label="Tedarikçi Adı" value={newName} onChange={setNewName} placeholder="Örn: Bosch Yetkili Bayi" />
           <TextField label="Telefon (isteğe bağlı)" value={newPhone} onChange={setNewPhone} inputMode="tel" placeholder="05XX XXX XX XX" />
@@ -1466,12 +3303,14 @@ function SupplierPicker({
 
   return (
     <View className="flex flex-col gap-1.5">
-      <Text className="text-sm font-semibold text-muted-foreground">Tedarikçi</Text>
+      <Text className="text-sm font-semibold text-muted-foreground">Tedarikçi (cari)</Text>
       {selectedId ? (
         <View className="flex-row items-center justify-between rounded-xl border-2 border-primary bg-primary/5 px-4 py-3">
-          <View className="flex-row items-center gap-2">
+          <View className="min-w-0 flex-1 flex-row items-center gap-2">
             <Truck size={16} color={colors.primary} />
-            <Text className="text-sm font-bold text-foreground">{selectedName}</Text>
+            <Text className="text-sm font-bold text-foreground" numberOfLines={1}>
+              {selectedName}
+            </Text>
           </View>
           <Pressable onPress={onClear}>
             <X size={18} color={colors.mutedForeground} />
@@ -1490,18 +3329,38 @@ function SupplierPicker({
             />
           </View>
           {!loading && results.length > 0 && (
-            <View className="flex flex-col gap-1.5">
-              {results.slice(0, 5).map((s) => (
+            <ScrollView
+              style={{ maxHeight: 160 }}
+              nestedScrollEnabled
+              keyboardShouldPersistTaps="handled"
+              className="rounded-xl border border-border bg-card"
+            >
+              {results.slice(0, 20).map((s, idx) => (
                 <Pressable
                   key={s.id}
                   onPress={() => onSelect(s)}
-                  className="flex-row items-center gap-2 rounded-xl border border-border bg-card px-3 py-2.5 active:bg-primary/5"
+                  className={cn(
+                    'flex-row items-center justify-between px-3 py-2.5 active:bg-primary/5',
+                    idx < Math.min(results.length, 20) - 1 && 'border-b border-border',
+                  )}
                 >
-                  <Truck size={14} color={colors.mutedForeground} />
-                  <Text className="text-sm font-semibold text-foreground">{s.name}</Text>
+                  <View className="min-w-0 flex-1 flex-row items-center gap-2">
+                    <Truck size={14} color={colors.mutedForeground} />
+                    <Text className="flex-1 text-sm font-semibold text-foreground" numberOfLines={1}>
+                      {s.name}
+                    </Text>
+                  </View>
+                  <Text
+                    className={cn(
+                      'text-xs font-bold',
+                      s.balance > 0 ? 'text-destructive' : 'text-muted-foreground',
+                    )}
+                  >
+                    {s.balance > 0 ? `Borç ${formatCurrency(s.balance)}` : 'Borç yok'}
+                  </Text>
                 </Pressable>
               ))}
-            </View>
+            </ScrollView>
           )}
           <Pressable
             onPress={() => {
@@ -1511,7 +3370,7 @@ function SupplierPicker({
             className="flex-row items-center gap-1.5 self-start rounded-lg px-1 py-1.5"
           >
             <Plus size={14} color={colors.primary} />
-            <Text className="text-xs font-bold text-primary">Yeni Cari Ekle</Text>
+            <Text className="text-xs font-bold text-primary">Yeni Tedarikçi</Text>
           </Pressable>
         </>
       )}
@@ -1530,6 +3389,7 @@ function ProductRow({
   onRequestReturn,
   onConfirmReturn,
   onCancelReturn,
+  onPaySupplier,
 }: {
   product: ProductItem
   confirming: boolean
@@ -1541,14 +3401,24 @@ function ProductRow({
   onRequestReturn: () => void
   onConfirmReturn: () => void
   onCancelReturn: () => void
+  onPaySupplier?: () => void
 }) {
+  const isReturned = !!product.returnedAt
+  const isExternal = product.source === 'disaridan'
+  const purchaseUnit = product.purchasePrice ?? 0
+  const purchaseTotal = purchaseUnit * product.quantity
+  const saleTotal = product.price * product.quantity
+
   if (confirming) {
     return (
       <View className="flex-row items-center gap-3 rounded-2xl border-2 border-destructive/40 bg-destructive/5 p-3">
         <View className="flex-1 pl-1">
           <Text className="text-sm font-bold text-foreground">Silinsin mi?</Text>
-          <Text className="mt-0.5 text-xs text-muted-foreground" numberOfLines={1}>
+          <Text className="mt-0.5 text-xs text-muted-foreground" numberOfLines={2}>
             {product.name}
+            {isExternal
+              ? ' — tedarikçi carisindeki alış kaydı da etkilenir.'
+              : ''}
           </Text>
         </View>
         <Pressable
@@ -1570,91 +3440,126 @@ function ProductRow({
 
   if (returnConfirming) {
     return (
-      <View className="flex-row items-center gap-3 rounded-2xl border-2 border-accent/40 bg-accent/5 p-3">
-        <View className="flex-1 pl-1">
-          <Text className="text-sm font-bold text-foreground">Tedarikçiye iade edilsin mi?</Text>
-          <Text className="mt-0.5 text-xs text-muted-foreground" numberOfLines={1}>
-            {product.name} — bu satır iş emri toplamından kaldırılacak.
-          </Text>
+      <View className="rounded-2xl border-2 border-accent/40 bg-accent/5 p-3">
+        <Text className="text-sm font-bold text-foreground">Tedarikçiye iade edilsin mi?</Text>
+        <Text className="mt-1 text-xs leading-4 text-muted-foreground">
+          {product.name}
+          {'\n'}· Müşteri iş emrinden satış tutarı düşer ({formatCurrency(saleTotal)})
+          {'\n'}· Tedarikçi borcu alış tutarı kadar azalır ({formatCurrency(purchaseTotal)})
+        </Text>
+        <View className="mt-3 flex-row gap-2">
+          <Pressable
+            onPress={onConfirmReturn}
+            className="h-11 flex-1 flex-row items-center justify-center gap-1.5 rounded-xl bg-accent"
+          >
+            <Undo2 size={16} color={colors.accentForeground} />
+            <Text className="text-sm font-bold text-accent-foreground">İade Et</Text>
+          </Pressable>
+          <Pressable
+            onPress={onCancelReturn}
+            className="h-11 w-11 items-center justify-center rounded-xl bg-secondary"
+          >
+            <X size={20} color={colors.secondaryForeground} />
+          </Pressable>
         </View>
-        <Pressable
-          onPress={onConfirmReturn}
-          className="h-11 flex-row items-center justify-center gap-1.5 rounded-xl bg-accent px-4"
-        >
-          <Undo2 size={16} color={colors.accentForeground} />
-          <Text className="text-sm font-bold text-accent-foreground">İade Et</Text>
-        </Pressable>
-        <Pressable
-          onPress={onCancelReturn}
-          className="h-11 w-11 items-center justify-center rounded-xl bg-secondary"
-        >
-          <X size={20} color={colors.secondaryForeground} />
-        </Pressable>
       </View>
     )
   }
-
-  const isReturned = !!product.returnedAt
-  const isExternal = product.source === 'disaridan'
 
   return (
     <View
       className={cn(
         'rounded-2xl border border-border bg-card p-4',
-        isReturned && 'opacity-60',
+        isReturned && 'opacity-70',
       )}
       style={cardShadow}
     >
-      <View className="flex-row items-center gap-3">
+      <View className="flex-row items-start gap-3">
         <View className="h-10 w-10 items-center justify-center rounded-xl bg-primary/10">
           <Package size={20} color={colors.primary} />
         </View>
         <View className="min-w-0 flex-1">
           <Text className="text-sm font-bold text-foreground">{product.name}</Text>
           <Text className="mt-0.5 text-xs text-muted-foreground">
-            {product.quantity} adet × {formatCurrency(product.price)}
+            {product.quantity} adet
+            {isExternal ? ' · Dışarıdan temin' : ' · Stoktan'}
           </Text>
-          <Text className="mt-0.5 text-sm font-extrabold text-foreground">
-            {formatCurrency(product.price * product.quantity)}
-          </Text>
+          {isExternal ? (
+            <View className="mt-1.5 gap-0.5">
+              <Text className="text-xs text-muted-foreground">
+                Alış (tedarikçi) {formatCurrency(purchaseUnit)} × {product.quantity} ={' '}
+                <Text className="font-bold text-destructive">{formatCurrency(purchaseTotal)}</Text>
+              </Text>
+              <Text className="text-xs text-muted-foreground">
+                Satış (müşteri) {formatCurrency(product.price)} × {product.quantity} ={' '}
+                <Text className="font-bold text-foreground">{formatCurrency(saleTotal)}</Text>
+              </Text>
+            </View>
+          ) : (
+            <Text className="mt-0.5 text-sm font-extrabold text-foreground">
+              {formatCurrency(saleTotal)}
+            </Text>
+          )}
         </View>
-        <View className="flex-row items-center gap-1.5">
-          <Pressable
-            onPress={onEdit}
-            className="h-10 w-10 items-center justify-center rounded-xl bg-secondary"
-          >
-            <Pencil size={16} color={colors.secondaryForeground} />
-          </Pressable>
-          <Pressable
-            onPress={onDelete}
-            className="h-10 w-10 items-center justify-center rounded-xl bg-destructive/10"
-          >
-            <Trash2 size={16} color={colors.destructive} />
-          </Pressable>
-        </View>
+        {!isReturned ? (
+          <View className="flex-row items-center gap-1.5">
+            <Pressable
+              onPress={onEdit}
+              className="h-10 w-10 items-center justify-center rounded-xl bg-secondary"
+            >
+              <Pencil size={16} color={colors.secondaryForeground} />
+            </Pressable>
+            <Pressable
+              onPress={onDelete}
+              className="h-10 w-10 items-center justify-center rounded-xl bg-destructive/10"
+            >
+              <Trash2 size={16} color={colors.destructive} />
+            </Pressable>
+          </View>
+        ) : null}
       </View>
 
       {isExternal && (
-        <View className="mt-3 flex-row flex-wrap items-center gap-2 border-t border-border pt-3">
-          <View className="flex-row items-center gap-1.5 rounded-full bg-accent/10 px-2.5 py-1">
-            <Truck size={12} color={colors.accent} />
-            <Text className="text-xs font-bold text-accent">
-              {product.supplierName ?? 'Tedarikçi'}
-            </Text>
-          </View>
-          {isReturned ? (
-            <View className="rounded-full bg-secondary px-2.5 py-1">
-              <Text className="text-xs font-bold text-muted-foreground">İade Edildi</Text>
+        <View className="mt-3 gap-2 border-t border-border pt-3">
+          <View className="flex-row flex-wrap items-center gap-2">
+            <View className="flex-row items-center gap-1.5 rounded-full bg-accent/10 px-2.5 py-1">
+              <Truck size={12} color={colors.accent} />
+              <Text className="text-xs font-bold text-accent">
+                {product.supplierName ?? 'Tedarikçi'}
+              </Text>
             </View>
-          ) : (
-            <Pressable
-              onPress={onRequestReturn}
-              className="flex-row items-center gap-1.5 rounded-full border border-accent/30 px-2.5 py-1 active:bg-accent/10"
-            >
-              <Undo2 size={12} color={colors.accent} />
-              <Text className="text-xs font-bold text-accent">Tedarikçiye İade Et</Text>
-            </Pressable>
-          )}
+            {isReturned ? (
+              <View className="rounded-full bg-secondary px-2.5 py-1">
+                <Text className="text-xs font-bold text-muted-foreground">İade edildi</Text>
+              </View>
+            ) : (
+              <View className="rounded-full bg-destructive/10 px-2.5 py-1">
+                <Text className="text-xs font-bold text-destructive">
+                  Cari borç +{formatCurrency(purchaseTotal)}
+                </Text>
+              </View>
+            )}
+          </View>
+          {!isReturned ? (
+            <View className="flex-row gap-2">
+              {onPaySupplier ? (
+                <Pressable
+                  onPress={onPaySupplier}
+                  className="h-10 flex-1 flex-row items-center justify-center gap-1.5 rounded-xl border-2 border-accent bg-accent/10 active:opacity-90"
+                >
+                  <Banknote size={14} color={colors.accent} />
+                  <Text className="text-xs font-extrabold text-accent">Tedarikçiye Öde</Text>
+                </Pressable>
+              ) : null}
+              <Pressable
+                onPress={onRequestReturn}
+                className="h-10 flex-1 flex-row items-center justify-center gap-1.5 rounded-xl border-2 border-border bg-card active:opacity-90"
+              >
+                <Undo2 size={14} color={colors.foreground} />
+                <Text className="text-xs font-extrabold text-foreground">İade Et</Text>
+              </Pressable>
+            </View>
+          ) : null}
         </View>
       )}
     </View>
@@ -1729,6 +3634,8 @@ function PhotoPicker({
   onPick: (uri: string) => void
   onClear: () => void
 }) {
+  const [pickerOpen, setPickerOpen] = useState(false)
+
   async function pickFrom(source: 'camera' | 'gallery') {
     const perm =
       source === 'camera'
@@ -1747,16 +3654,38 @@ function PhotoPicker({
     if (asset?.uri) onPick(asset.uri)
   }
 
-  function pick() {
-    Alert.alert('Fotoğraf Ekle', 'Fotoğrafı nereden eklemek istersiniz?', [
-      { text: 'İptal', style: 'cancel' },
-      { text: 'Kamera', onPress: () => pickFrom('camera') },
-      { text: 'Galeri', onPress: () => pickFrom('gallery') },
-    ])
-  }
-
   return (
     <View className="mt-3">
+      <AppSheet
+        visible={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        title="Fotoğraf Ekle"
+        subtitle="Fotoğrafı nereden eklemek istersiniz?"
+      >
+        <SheetActionList
+          onClose={() => setPickerOpen(false)}
+          actions={[
+            {
+              key: 'camera',
+              label: 'Kamera',
+              description: 'Yeni fotoğraf çek',
+              icon: Camera,
+              tone: 'accent',
+              onPress: () => pickFrom('camera'),
+            },
+            {
+              key: 'gallery',
+              label: 'Galeri',
+              description: 'Kayıtlı fotoğraftan seç',
+              icon: ImagePlus,
+              tone: 'primary',
+              onPress: () => pickFrom('gallery'),
+            },
+          ]}
+        />
+        <SheetCancelButton onPress={() => setPickerOpen(false)} />
+      </AppSheet>
+
       {uri ? (
         <View className="flex-row items-center gap-3">
           <Image source={{ uri }} resizeMode="cover" className="h-16 w-16 rounded-xl" />
@@ -1770,7 +3699,7 @@ function PhotoPicker({
         </View>
       ) : (
         <Pressable
-          onPress={pick}
+          onPress={() => setPickerOpen(true)}
           className="h-12 flex-row items-center justify-center gap-2 rounded-xl border border-dashed border-border bg-secondary/50"
         >
           <ImagePlus size={16} color={colors.mutedForeground} />
@@ -1781,15 +3710,43 @@ function PhotoPicker({
   )
 }
 
-function PhotoGallery({ workOrderId, imageType }: { workOrderId: string; imageType: string }) {
+function PhotoGallery({
+  workOrderId,
+  imageType,
+  complaintId,
+  serviceId,
+  heading,
+  refreshKey = 0,
+}: {
+  workOrderId: string
+  imageType: string
+  /** Verilirse sadece bu şikayete ait fotoğraflar gösterilir. */
+  complaintId?: string
+  /** Verilirse sadece bu işleme ait fotoğraflar gösterilir. */
+  serviceId?: string
+  /** Başlık metni özelleştirmesi (örn. "Diğer Fotoğraflar"). Verilmezse "Fotoğraflar (N)" kullanılır. */
+  heading?: string
+  /** Yükleme sonrası galeriyi yeniden çekmek için artırılır. */
+  refreshKey?: number
+}) {
   const [images, setImages] = useState<WorkOrderImage[]>([])
   const [loaded, setLoaded] = useState(false)
+  const [previewUri, setPreviewUri] = useState<string | null>(null)
+  const [expanded, setExpanded] = useState(true)
 
   useEffect(() => {
     let active = true
+    setLoaded(false)
     getWorkOrderImages(workOrderId)
       .then((rows) => {
-        if (active) setImages(rows.filter((r) => r.imageType === imageType))
+        if (!active) return
+        const byType = rows.filter((r) => r.imageType === imageType)
+        const filtered = complaintId
+          ? byType.filter((r) => r.complaintId === complaintId)
+          : serviceId
+            ? byType.filter((r) => r.serviceId === serviceId)
+            : byType.filter((r) => !r.complaintId && !r.serviceId)
+        setImages(filtered)
       })
       .catch(() => {
         /* fotoğraflar yüklenemedi — sekmeyi kullanılamaz hale getirmeyelim */
@@ -1800,21 +3757,76 @@ function PhotoGallery({ workOrderId, imageType }: { workOrderId: string; imageTy
     return () => {
       active = false
     }
-  }, [workOrderId, imageType])
+  }, [workOrderId, imageType, complaintId, serviceId, refreshKey])
 
   if (!loaded || images.length === 0) return null
 
   return (
-    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
-      {images.map((img) => (
-        <Image
-          key={img.id}
-          source={{ uri: absoluteImageUrl(img.url) }}
-          resizeMode="cover"
-          className="h-16 w-16 rounded-xl bg-secondary"
-        />
-      ))}
-    </ScrollView>
+    <>
+      <Pressable
+        onPress={() => setExpanded((v) => !v)}
+        className="flex-row items-center justify-between rounded-xl bg-secondary/60 px-3 py-2"
+      >
+        <View className="flex-row items-center gap-2">
+          <ImagePlus size={16} color={colors.mutedForeground} />
+          <Text className="text-xs font-bold text-muted-foreground">
+            {heading ?? `Fotoğraflar (${images.length})`}
+          </Text>
+        </View>
+        {expanded ? (
+          <ChevronUp size={18} color={colors.mutedForeground} />
+        ) : (
+          <ChevronDown size={18} color={colors.mutedForeground} />
+        )}
+      </Pressable>
+
+      {expanded && (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={{ gap: 8, marginTop: 8 }}
+        >
+          {images.map((img) => {
+            const uri = absoluteImageUrl(img.url)
+            return (
+              <Pressable key={img.id} onPress={() => setPreviewUri(uri)}>
+                <Image
+                  source={{ uri }}
+                  resizeMode="cover"
+                  className="h-16 w-16 rounded-xl bg-secondary"
+                />
+              </Pressable>
+            )
+          })}
+        </ScrollView>
+      )}
+
+      <Modal
+        visible={!!previewUri}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setPreviewUri(null)}
+      >
+        <Pressable
+          onPress={() => setPreviewUri(null)}
+          className="flex-1 items-center justify-center bg-foreground/90"
+        >
+          {previewUri ? (
+            <Image
+              source={{ uri: previewUri }}
+              resizeMode="contain"
+              className="h-full w-full"
+            />
+          ) : null}
+          <Pressable
+            onPress={() => setPreviewUri(null)}
+            className="absolute right-5 top-14 h-11 w-11 items-center justify-center rounded-xl bg-card"
+          >
+            <X size={22} color={colors.foreground} />
+          </Pressable>
+        </Pressable>
+      </Modal>
+    </>
   )
 }
 
@@ -1828,6 +3840,7 @@ function Row({
   onDelete,
   onConfirmDelete,
   onCancelDelete,
+  footer,
 }: {
   icon: IconType
   title: string
@@ -1838,6 +3851,7 @@ function Row({
   onDelete: () => void
   onConfirmDelete: () => void
   onCancelDelete: () => void
+  footer?: React.ReactNode
 }) {
   if (confirming) {
     return (
@@ -1866,34 +3880,34 @@ function Row({
   }
 
   return (
-    <View
-      className="flex-row items-center gap-3 rounded-2xl border border-border bg-card p-4"
-      style={cardShadow}
-    >
-      <View className="h-10 w-10 items-center justify-center rounded-xl bg-primary/10">
-        <Icon size={20} color={colors.primary} />
+    <View className="rounded-2xl border border-border bg-card p-4" style={cardShadow}>
+      <View className="flex-row items-center gap-3">
+        <View className="h-10 w-10 items-center justify-center rounded-xl bg-primary/10">
+          <Icon size={20} color={colors.primary} />
+        </View>
+        <View className="min-w-0 flex-1">
+          <Text className="text-sm font-bold text-foreground">{title}</Text>
+          {subtitle ? (
+            <Text className="mt-0.5 text-xs text-muted-foreground">{subtitle}</Text>
+          ) : null}
+          <Text className="mt-0.5 text-sm font-extrabold text-foreground">{value}</Text>
+        </View>
+        <View className="flex-row items-center gap-1.5">
+          <Pressable
+            onPress={onEdit}
+            className="h-10 w-10 items-center justify-center rounded-xl bg-secondary"
+          >
+            <Pencil size={16} color={colors.secondaryForeground} />
+          </Pressable>
+          <Pressable
+            onPress={onDelete}
+            className="h-10 w-10 items-center justify-center rounded-xl bg-destructive/10"
+          >
+            <Trash2 size={16} color={colors.destructive} />
+          </Pressable>
+        </View>
       </View>
-      <View className="min-w-0 flex-1">
-        <Text className="text-sm font-bold text-foreground">{title}</Text>
-        {subtitle ? (
-          <Text className="mt-0.5 text-xs text-muted-foreground">{subtitle}</Text>
-        ) : null}
-        <Text className="mt-0.5 text-sm font-extrabold text-foreground">{value}</Text>
-      </View>
-      <View className="flex-row items-center gap-1.5">
-        <Pressable
-          onPress={onEdit}
-          className="h-10 w-10 items-center justify-center rounded-xl bg-secondary"
-        >
-          <Pencil size={16} color={colors.secondaryForeground} />
-        </Pressable>
-        <Pressable
-          onPress={onDelete}
-          className="h-10 w-10 items-center justify-center rounded-xl bg-destructive/10"
-        >
-          <Trash2 size={16} color={colors.destructive} />
-        </Pressable>
-      </View>
+      {footer ? <View className="mt-3">{footer}</View> : null}
     </View>
   )
 }

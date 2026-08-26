@@ -1,5 +1,8 @@
 // React Native (Hermes) ortamında Intl yerel verisi platforma göre değişebildiği
 // için Türkçe biçimlendirmeyi elle yapıyoruz; web ile birebir aynı çıktıyı verir.
+//
+// API tarihleri SQL SYSUTCDATETIME (UTC) ile gelir; JSON'da genelde Z/offset yoktur.
+// Bunları UTC kabul edip Türkiye saatinde (UTC+3, DST yok) gösteririz.
 
 const TR_MONTHS = [
   'Ocak',
@@ -16,6 +19,9 @@ const TR_MONTHS = [
   'Aralık',
 ]
 
+/** Türkiye sabit UTC+3 (2016'dan beri yaz saati yok). */
+const TURKEY_OFFSET_MS = 3 * 60 * 60 * 1000
+
 function groupThousands(value: number): string {
   const rounded = Math.round(value)
   return String(rounded).replace(/\B(?=(\d{3})+(?!\d))/g, '.')
@@ -29,22 +35,55 @@ function pad2(n: number): string {
   return n < 10 ? `0${n}` : String(n)
 }
 
-export function formatTime(iso: string): string {
+function hasTimezone(iso: string): boolean {
+  return /[zZ]$|[+-]\d{2}:?\d{2}$/.test(iso)
+}
+
+/** API'den gelen ISO tarihini UTC anı olarak çözümler. */
+function parseApiUtc(iso: string): Date | null {
   try {
-    const d = new Date(iso)
-    if (Number.isNaN(d.getTime())) return ''
-    return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`
+    const raw = iso.trim()
+    if (!raw) return null
+    const normalized = raw.includes('T') ? raw : raw.replace(' ', 'T')
+    const d = new Date(hasTimezone(normalized) ? normalized : `${normalized}Z`)
+    if (Number.isNaN(d.getTime())) return null
+    return d
   } catch {
-    return ''
+    return null
   }
 }
 
+/** UTC anını Türkiye duvar saatine kaydırır; getUTC* ile TR alanları okunur. */
+function toTurkeyWallClock(iso: string): Date | null {
+  const utc = parseApiUtc(iso)
+  if (!utc) return null
+  return new Date(utc.getTime() + TURKEY_OFFSET_MS)
+}
+
+export function formatTime(iso: string): string {
+  const d = toTurkeyWallClock(iso)
+  if (!d) return ''
+  return `${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())}`
+}
+
 export function formatDate(iso: string): string {
-  try {
-    const d = new Date(iso)
-    if (Number.isNaN(d.getTime())) return ''
-    return `${pad2(d.getDate())} ${TR_MONTHS[d.getMonth()]} ${d.getFullYear()}`
-  } catch {
-    return ''
-  }
+  const d = toTurkeyWallClock(iso)
+  if (!d) return ''
+  return `${pad2(d.getUTCDate())} ${TR_MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`
+}
+
+/** Türkiye takvim günü: YYYY-MM-DD (gruplama için). */
+export function toTurkeyDateKey(iso: string): string {
+  const d = toTurkeyWallClock(iso)
+  if (!d) return iso.slice(0, 10)
+  return `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())}`
+}
+
+/** Örn: "27 Temmuz 2026 14:30" */
+export function formatDateTime(iso: string): string {
+  const date = formatDate(iso)
+  const time = formatTime(iso)
+  if (!date) return time
+  if (!time) return date
+  return `${date} ${time}`
 }

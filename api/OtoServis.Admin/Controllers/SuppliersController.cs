@@ -12,6 +12,12 @@ public class SuppliersController(AdminDataService data) : Controller
 {
     public async Task<IActionResult> Index(string? search)
     {
+        var plan = HttpContext.Items["PlanEntitlements"] as AdminPlanEntitlements;
+        if (plan is { Features.Suppliers: false })
+        {
+            TempData["Error"] = "Tedarikçi / cari bu pakette yok. Profesyonel veya Kurumsal pakete yükseltin.";
+            return RedirectToAction("Index", "Dashboard");
+        }
         var items = await data.GetSuppliersAsync(search);
         return View(new SuppliersIndexViewModel { Search = search, Items = items });
     }

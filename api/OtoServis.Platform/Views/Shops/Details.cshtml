@@ -1,0 +1,357 @@
+@model ShopDetailViewModel
+@using OtoServis.Platform.Services
+@{
+    ViewData["Title"] = Model.Shop.Name;
+    var tr = TimeSpan.FromHours(3);
+}
+<div class="mb-3">
+    <a asp-action="Index" class="small text-decoration-none">&larr; Servis listesi</a>
+</div>
+
+@if (!string.IsNullOrEmpty(Model.Flash))
+{
+    <div class="alert alert-success py-2">@Model.Flash</div>
+}
+@if (!string.IsNullOrEmpty(Model.Error))
+{
+    <div class="alert alert-danger py-2">@Model.Error</div>
+}
+
+<div class="row g-4 mb-2">
+    <div class="col-lg-4">
+        <div class="stat-card h-100">
+            <div class="text-muted small">Kod</div>
+            <div class="fw-bold"><code>@Model.Shop.TenantCode</code></div>
+            <div class="text-muted small mt-3">Kullanıcı</div>
+            <div class="fs-4 fw-bold @(Model.Shop.EffectiveMaxUsers.HasValue && Model.Shop.ActiveUsers >= Model.Shop.EffectiveMaxUsers ? "text-danger" : "")">
+                @Model.Shop.ActiveUsers / @(Model.Shop.EffectiveMaxUsers?.ToString() ?? "∞")
+            </div>
+            <div class="text-muted small mt-1">
+                Plan: @Model.Shop.PlanLabel
+                @if (Model.Shop.MaxUsersOverride.HasValue)
+                {
+                    <span>· özel limit</span>
+                }
+            </div>
+            <div class="text-muted small mt-3">Lisans</div>
+            <div class="fw-bold @(Model.Shop.LicenseStatus == "expired" ? "text-danger" : Model.Shop.LicenseStatus == "warning" ? "text-warning" : "")">
+                @LicenseHelper.TypeLabel(Model.Shop.LicenseType)
+            </div>
+            <div class="small text-muted">
+                @LicenseHelper.StatusLabel(Model.Shop.LicenseStatus, Model.Shop.DaysRemaining)
+                @if (Model.Shop.LicenseExpiresAt.HasValue)
+                {
+                    <span>· bitiş @Model.Shop.LicenseExpiresAt.Value.ToString("dd.MM.yyyy")</span>
+                }
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-8">
+        <div class="card border-0 shadow-sm">
+            <div class="card-body">
+                <h2 class="h6 fw-bold mb-3">Servis bilgileri</h2>
+                <form asp-action="Update" method="post">
+                    @Html.AntiForgeryToken()
+                    <input type="hidden" asp-for="Edit.Id" />
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label asp-for="Edit.Name" class="form-label"></label>
+                            <input asp-for="Edit.Name" class="form-control" />
+                        </div>
+                        <div class="col-md-3">
+                            <label asp-for="Edit.Phone" class="form-label"></label>
+                            <input asp-for="Edit.Phone" class="form-control" />
+                        </div>
+                        <div class="col-md-3">
+                            <label asp-for="Edit.City" class="form-label"></label>
+                            <input asp-for="Edit.City" class="form-control" />
+                        </div>
+                        <div class="col-md-4">
+                            <label asp-for="Edit.SubscriptionPlan" class="form-label"></label>
+                            <select asp-for="Edit.SubscriptionPlan" class="form-select">
+                                @foreach (var p in Model.Plans)
+                                {
+                                    <option value="@p.Code">@p.Label — ₺@p.MonthlyPrice.ToString("0") (@(p.MaxUsers?.ToString() ?? "∞") kull.)</option>
+                                }
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label asp-for="Edit.MaxUsers" class="form-label"></label>
+                            <input asp-for="Edit.MaxUsers" class="form-control" placeholder="Plan varsayılanı" />
+                        </div>
+                        <div class="col-md-4 d-flex align-items-end">
+                            <div class="form-check mb-2">
+                                <input asp-for="Edit.IsActive" class="form-check-input" />
+                                <label asp-for="Edit.IsActive" class="form-check-label"></label>
+                            </div>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-sm text-white mt-3" style="background:#2f4a86">Kaydet</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card border-0 shadow-sm mb-4">
+    <div class="card-body">
+        <h2 class="h6 fw-bold mb-3">Lisans / süre yönetimi</h2>
+        <div class="d-flex flex-wrap gap-2 mb-3">
+            @foreach (var t in LicenseHelper.Types)
+            {
+                <form asp-action="ExtendLicense" method="post" class="d-inline">
+                    @Html.AntiForgeryToken()
+                    <input type="hidden" name="id" value="@Model.Shop.Id" />
+                    <input type="hidden" name="licenseType" value="@t.Code" />
+                    <button type="submit" class="btn btn-sm btn-outline-primary">@t.Label</button>
+                </form>
+            }
+        </div>
+        <form asp-action="SetLicense" method="post" class="row g-2 align-items-end">
+            @Html.AntiForgeryToken()
+            <input type="hidden" name="id" value="@Model.Shop.Id" />
+            <div class="col-md-3">
+                <label class="form-label small">Lisans tipi</label>
+                <select name="LicenseType" class="form-select form-select-sm" asp-for="LicenseEdit.LicenseType">
+                    @foreach (var t in LicenseHelper.Types)
+                    {
+                        <option value="@t.Code">@t.Label</option>
+                    }
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label small">Bitiş (elle, opsiyonel)</label>
+                <input type="date" name="LicenseExpiresAt" class="form-control form-control-sm"
+                       value="@(Model.LicenseEdit.LicenseExpiresAt?.ToString("yyyy-MM-dd"))" />
+            </div>
+            <div class="col-md-4">
+                <label class="form-label small">Not</label>
+                <input name="Note" class="form-control form-control-sm" placeholder="Örn. havale alındı" />
+            </div>
+            <div class="col-md-2">
+                <button type="submit" class="btn btn-sm text-white w-100" style="background:#2f4a86">Kaydet</button>
+            </div>
+        </form>
+        @if (Model.LicenseEvents.Count > 0)
+        {
+            <div class="table-responsive mt-3">
+                <table class="table table-sm mb-0">
+                    <thead class="table-light">
+                    <tr><th>Tarih</th><th>Tip</th><th>Bitiş</th><th>Not</th></tr>
+                    </thead>
+                    <tbody>
+                    @foreach (var e in Model.LicenseEvents)
+                    {
+                        <tr>
+                            <td class="small">@e.CreatedAt.Add(tr).ToString("dd.MM.yyyy HH:mm")</td>
+                            <td class="small">@LicenseHelper.TypeLabel(e.NewLicenseType)</td>
+                            <td class="small">@(e.NewExpiresAt?.ToString("dd.MM.yyyy") ?? "Sınırsız")</td>
+                            <td class="small">@(e.Note ?? "-")</td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+</div>
+
+<div class="card border-0 shadow-sm mb-4">
+    <div class="card-body">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h2 class="h6 fw-bold mb-0">Kullanıcılar</h2>
+        </div>
+        <div class="table-responsive mb-4">
+            <table class="table table-sm align-middle">
+                <thead class="table-light">
+                <tr>
+                    <th>Ad</th>
+                    <th>Telefon</th>
+                    <th>Rol</th>
+                    <th>Durum</th>
+                    <th></th>
+                </tr>
+                </thead>
+                <tbody>
+                @foreach (var u in Model.Users)
+                {
+                    <tr class="@(!u.IsActive ? "table-secondary" : "")">
+                        <td>
+                            @u.FullName
+                            @if (u.IsOwner)
+                            {
+                                <span class="badge text-bg-warning ms-1">Sahip</span>
+                            }
+                            @if (!string.IsNullOrEmpty(u.Title))
+                            {
+                                <div class="small text-muted">@u.Title</div>
+                            }
+                        </td>
+                        <td>@u.Phone</td>
+                        <td>@RoleLabels.Label(u.Role)</td>
+                        <td>@(u.IsActive ? "Aktif" : "Pasif")</td>
+                        <td class="text-end">
+                            <div class="d-inline-flex flex-wrap gap-1 justify-content-end">
+                                @if (u.IsActive)
+                                {
+                                    <form asp-action="DeactivateUser" method="post" class="d-inline">
+                                        @Html.AntiForgeryToken()
+                                        <input type="hidden" name="id" value="@Model.Shop.Id" />
+                                        <input type="hidden" name="userId" value="@u.UserId" />
+                                        <button type="submit" class="btn btn-sm btn-outline-danger"
+                                                onclick="return confirm('Kullanıcı pasifleştirilsin mi?')">Pasifleştir</button>
+                                    </form>
+                                }
+                                else
+                                {
+                                    <form asp-action="ActivateUser" method="post" class="d-inline">
+                                        @Html.AntiForgeryToken()
+                                        <input type="hidden" name="id" value="@Model.Shop.Id" />
+                                        <input type="hidden" name="userId" value="@u.UserId" />
+                                        <button type="submit" class="btn btn-sm btn-outline-success">Aktifleştir</button>
+                                    </form>
+                                }
+                                <button type="button" class="btn btn-sm btn-outline-secondary"
+                                        data-bs-toggle="collapse" data-bs-target="#pwd-@u.UserId">Şifre</button>
+                            </div>
+                            <div class="collapse mt-2" id="pwd-@u.UserId">
+                                <form asp-action="ResetPassword" method="post" class="d-flex gap-2 justify-content-end">
+                                    @Html.AntiForgeryToken()
+                                    <input type="hidden" name="id" value="@Model.Shop.Id" />
+                                    <input type="hidden" name="UserId" value="@u.UserId" />
+                                    <input type="password" name="NewPassword" class="form-control form-control-sm" style="max-width:160px"
+                                           placeholder="Yeni şifre" required minlength="4" />
+                                    <button type="submit" class="btn btn-sm btn-primary">Kaydet</button>
+                                </form>
+                            </div>
+                        </td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        </div>
+
+        <h3 class="h6 fw-bold">Kullanıcı ekle</h3>
+        <form asp-action="AddUser" method="post" class="row g-2 align-items-end">
+            @Html.AntiForgeryToken()
+            <input type="hidden" name="id" value="@Model.Shop.Id" />
+            <div class="col-md-3">
+                <label class="form-label small">Ad soyad</label>
+                <input name="FullName" class="form-control form-control-sm" required />
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small">Telefon</label>
+                <input name="Phone" class="form-control form-control-sm" required />
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small">Şifre</label>
+                <input name="Password" type="password" class="form-control form-control-sm" required minlength="4" />
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small">Rol</label>
+                <select name="Role" class="form-select form-select-sm">
+                    @foreach (var r in RoleLabels.ShopRoles)
+                    {
+                        <option value="@r.Code">@r.Label</option>
+                    }
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small">Ünvan</label>
+                <input name="Title" class="form-control form-control-sm" />
+            </div>
+            <div class="col-md-1">
+                <button type="submit" class="btn btn-sm text-white w-100" style="background:#2f4a86">Ekle</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="row g-4">
+    <div class="col-lg-7">
+        <div class="card border-0 shadow-sm">
+            <div class="card-body">
+                <h2 class="h6 fw-bold mb-3">Durum hareketleri (30 gün)</h2>
+                <div class="table-responsive">
+                    <table class="table table-sm align-middle mb-0">
+                        <thead class="table-light">
+                        <tr>
+                            <th>Zaman</th>
+                            <th>İş emri</th>
+                            <th>Durum</th>
+                            <th>Atanan</th>
+                        </tr>
+                        </thead>
+                        <tbody>
+                        @if (Model.StatusHistory.Count == 0)
+                        {
+                            <tr><td colspan="4" class="text-muted">Kayıt yok.</td></tr>
+                        }
+                        else
+                        {
+                            foreach (var h in Model.StatusHistory)
+                            {
+                                var local = h.ChangedAt.Add(tr);
+                                <tr>
+                                    <td class="small text-nowrap">@local.ToString("dd.MM.yyyy HH:mm")</td>
+                                    <td>
+                                        <div class="fw-semibold">#@h.OrderNo</div>
+                                        <div class="small text-muted">@h.Plate</div>
+                                    </td>
+                                    <td class="small">
+                                        @RoleLabels.StatusLabel(h.OldStatus) → <strong>@RoleLabels.StatusLabel(h.NewStatus)</strong>
+                                        @if (!string.IsNullOrEmpty(h.ChangedByName))
+                                        {
+                                            <div class="text-muted">@h.ChangedByName</div>
+                                        }
+                                    </td>
+                                    <td class="small">@(h.AssignedTo ?? "-")</td>
+                                </tr>
+                            }
+                        }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-5">
+        <div class="card border-0 shadow-sm">
+            <div class="card-body">
+                <h2 class="h6 fw-bold mb-3">Ödemeler (30 gün)</h2>
+                <div class="table-responsive">
+                    <table class="table table-sm align-middle mb-0">
+                        <thead class="table-light">
+                        <tr>
+                            <th>Zaman</th>
+                            <th>İş emri</th>
+                            <th>Tutar</th>
+                        </tr>
+                        </thead>
+                        <tbody>
+                        @if (Model.Payments.Count == 0)
+                        {
+                            <tr><td colspan="3" class="text-muted">Kayıt yok.</td></tr>
+                        }
+                        else
+                        {
+                            foreach (var p in Model.Payments)
+                            {
+                                var local = p.PaidAt.Add(tr);
+                                <tr>
+                                    <td class="small text-nowrap">@local.ToString("dd.MM.yyyy HH:mm")</td>
+                                    <td>
+                                        <div class="fw-semibold">#@p.OrderNo · @p.Plate</div>
+                                        <div class="small text-muted">@p.Method @(p.ReceivedByName != null ? "· " + p.ReceivedByName : "")</div>
+                                    </td>
+                                    <td class="fw-semibold text-nowrap">@p.Amount.ToString("N0") ₺</td>
+                                </tr>
+                            }
+                        }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>

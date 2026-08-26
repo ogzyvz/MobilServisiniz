@@ -1,6 +1,9 @@
 import AsyncStorage from '@react-native-async-storage/async-storage'
+import { File } from 'expo-file-system'
+import { fetch as expoFetch } from 'expo/fetch'
 import { API_BASE_URL } from './api-config'
 import type {
+  ComplaintCategory,
   Customer,
   JobStatus,
   ProductItem,
@@ -10,6 +13,14 @@ import type {
   Supplier,
   Vehicle,
 } from './types'
+import { COMPLAINT_CATEGORY_ORDER } from './types'
+
+function normalizeComplaintCategory(raw?: string | null): ComplaintCategory {
+  const c = (raw ?? 'diger').trim().toLowerCase()
+  return (COMPLAINT_CATEGORY_ORDER as string[]).includes(c)
+    ? (c as ComplaintCategory)
+    : 'diger'
+}
 
 const TOKEN_KEY = 'otoservis_token'
 const USER_KEY = 'otoservis_user'
@@ -17,10 +28,56 @@ const USER_ID_KEY = 'otoservis_user_id'
 const USER_ROLE_KEY = 'otoservis_user_role'
 const TENANT_CODE_KEY = 'otoservis_tenant_code'
 const SHOP_NAME_KEY = 'otoservis_shop_name'
+const REMEMBER_KEY = 'otoservis_remember'
+const REMEMBER_PHONE_KEY = 'otoservis_remember_phone'
+const REMEMBER_PASSWORD_KEY = 'otoservis_remember_password'
+
+export type ShopLicense = {
+  licenseType: string
+  licenseExpiresAt?: string | null
+  licenseStatus: 'active' | 'warning' | 'expired'
+  daysRemaining?: number | null
+}
+
+export type PlanFeatures = {
+  stock: boolean
+  suppliers: boolean
+  staffPerformance: boolean
+  aiRuhsat: boolean
+  aiInvoice: boolean
+  apiAccess: boolean
+}
+
+export type PlanEntitlements = {
+  planCode: string
+  planLabel: string
+  monthlyPrice: number
+  maxUsers: number | null
+  maxVehiclesPerMonth: number | null
+  features: PlanFeatures
+}
+
+export class PlanLimitError extends Error {
+  code = 'PLAN_LIMIT'
+  constructor(message?: string) {
+    super(message || 'Paket limitine ulaşıldı.')
+    this.name = 'PlanLimitError'
+  }
+}
+
+export class PlanFeatureError extends Error {
+  code = 'PLAN_FEATURE'
+  feature?: string
+  constructor(message?: string, feature?: string) {
+    super(message || 'Bu özellik paketinizde yok.')
+    this.name = 'PlanFeatureError'
+    this.feature = feature
+  }
+}
 
 export type AuthResult =
-  | { ok: true; name: string }
-  | { ok: false; error: string }
+  | { ok: true; name: string; license?: ShopLicense | null }
+  | { ok: false; error: string; licenseExpired?: boolean }
 
 export type PlateConflictInfo = {
   vehicleId: string
@@ -63,6 +120,89 @@ export class WorkOrderReopenBlockedError extends Error {
         'Bu iş farklı bir günde tamamlandı, durumu geri alamazsınız. Yeni bir servis kaydı açabilirsiniz.',
     )
     this.name = 'WorkOrderReopenBlockedError'
+  }
+}
+
+export class SessionReplacedError extends Error {
+  constructor(message?: string) {
+    super(message || 'Hesabınıza başka bir cihazdan giriş yapıldı. Lütfen tekrar giriş yapın.')
+    this.name = 'SessionReplacedError'
+  }
+}
+
+export class ShopLicenseExpiredError extends Error {
+  constructor(message?: string) {
+    super(
+      message ||
+        'Servis lisans süreniz dolmuştur. Yenileme için lütfen iletişime geçin.',
+    )
+    this.name = 'ShopLicenseExpiredError'
+  }
+}
+
+type SessionInvalidatedHandler = () => void
+let onSessionInvalidated: SessionInvalidatedHandler | null = null
+let onLicenseExpired: SessionInvalidatedHandler | null = null
+let cachedLicense: ShopLicense | null = null
+let cachedEntitlements: PlanEntitlements | null = null
+
+/** Başka cihazdan giriş algılandığında uygulama oturumu kapatmak için kaydolur. */
+export function setSessionInvalidatedHandler(handler: SessionInvalidatedHandler | null) {
+  onSessionInvalidated = handler
+}
+
+export function setLicenseExpiredHandler(handler: SessionInvalidatedHandler | null) {
+  onLicenseExpired = handler
+}
+
+export function getCachedLicense(): ShopLicense | null {
+  return cachedLicense
+}
+
+export function getCachedEntitlements(): PlanEntitlements | null {
+  return cachedEntitlements
+}
+
+function mapEntitlements(raw: any): PlanEntitlements | null {
+  if (!raw) return null
+  const f = raw.features ?? raw.Features ?? {}
+  return {
+    planCode: String(raw.planCode ?? raw.PlanCode ?? ''),
+    planLabel: String(raw.planLabel ?? raw.PlanLabel ?? ''),
+    monthlyPrice: Number(raw.monthlyPrice ?? raw.MonthlyPrice ?? 0),
+    maxUsers:
+      raw.maxUsers != null || raw.MaxUsers != null
+        ? Number(raw.maxUsers ?? raw.MaxUsers)
+        : null,
+    maxVehiclesPerMonth:
+      raw.maxVehiclesPerMonth != null || raw.MaxVehiclesPerMonth != null
+        ? Number(raw.maxVehiclesPerMonth ?? raw.MaxVehiclesPerMonth)
+        : null,
+    features: {
+      stock: !!(f.stock ?? f.Stock),
+      suppliers: !!(f.suppliers ?? f.Suppliers),
+      staffPerformance: !!(f.staffPerformance ?? f.StaffPerformance),
+      aiRuhsat: !!(f.aiRuhsat ?? f.AiRuhsat),
+      aiInvoice: !!(f.aiInvoice ?? f.AiInvoice),
+      apiAccess: !!(f.apiAccess ?? f.ApiAccess),
+    },
+  }
+}
+
+function mapLicense(raw: any): ShopLicense | null {
+  if (!raw) return null
+  const status = String(raw.licenseStatus ?? raw.LicenseStatus ?? 'active')
+  return {
+    licenseType: String(raw.licenseType ?? raw.LicenseType ?? 'unlimited'),
+    licenseExpiresAt: raw.licenseExpiresAt ?? raw.LicenseExpiresAt ?? null,
+    licenseStatus:
+      status === 'warning' || status === 'expired' ? status : 'active',
+    daysRemaining:
+      raw.daysRemaining != null
+        ? Number(raw.daysRemaining)
+        : raw.DaysRemaining != null
+          ? Number(raw.DaysRemaining)
+          : null,
   }
 }
 
@@ -109,11 +249,53 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
 
 export async function clearSession() {
   token = null
+  cachedLicense = null
+  cachedEntitlements = null
   await AsyncStorage.multiRemove([TOKEN_KEY, USER_KEY, USER_ID_KEY, USER_ROLE_KEY, SHOP_NAME_KEY])
 }
 
 export async function getStoredTenantCode(): Promise<string | null> {
   return AsyncStorage.getItem(TENANT_CODE_KEY)
+}
+
+export type RememberedLogin = {
+  identifier: string
+  password: string
+  /** @deprecated eski kayıtlar için */
+  tenantCode?: string
+  /** @deprecated eski kayıtlar için — identifier ile aynı */
+  phone?: string
+}
+
+/** "Beni hatırla" ile saklanan giriş bilgileri (çıkışta silinmez). */
+export async function getRememberedLogin(): Promise<RememberedLogin | null> {
+  const flag = await AsyncStorage.getItem(REMEMBER_KEY)
+  if (flag !== '1') return null
+  const [loginId, password, tenantCode] = await Promise.all([
+    AsyncStorage.getItem(REMEMBER_PHONE_KEY),
+    AsyncStorage.getItem(REMEMBER_PASSWORD_KEY),
+    AsyncStorage.getItem(TENANT_CODE_KEY),
+  ])
+  if (!loginId?.trim() || !password) return null
+  return {
+    identifier: loginId.trim(),
+    password,
+    phone: loginId.trim(),
+    tenantCode: tenantCode ?? undefined,
+  }
+}
+
+export async function saveRememberedLogin(data: RememberedLogin): Promise<void> {
+  const id = (data.identifier || data.phone || '').trim()
+  await AsyncStorage.multiSet([
+    [REMEMBER_KEY, '1'],
+    [REMEMBER_PHONE_KEY, id],
+    [REMEMBER_PASSWORD_KEY, data.password],
+  ])
+}
+
+export async function clearRememberedLogin(): Promise<void> {
+  await AsyncStorage.multiRemove([REMEMBER_KEY, REMEMBER_PHONE_KEY, REMEMBER_PASSWORD_KEY])
 }
 
 export async function lookupTenant(code: string): Promise<{ shopName: string; city?: string } | null> {
@@ -151,6 +333,29 @@ async function api<T>(
     } catch {
       /* ignore */
     }
+    if (res.status === 401 && (body?.code === 'SESSION_REPLACED' || body?.error?.includes?.('başka bir cihaz'))) {
+      await clearSession()
+      onSessionInvalidated?.()
+      throw new SessionReplacedError(body?.error)
+    }
+    if (res.status === 403 && body?.code === 'SHOP_LICENSE_EXPIRED') {
+      cachedLicense = {
+        licenseType: 'unknown',
+        licenseStatus: 'expired',
+        daysRemaining: null,
+      }
+      if (auth) {
+        await clearSession()
+        onLicenseExpired?.()
+      }
+      throw new ShopLicenseExpiredError(body?.error)
+    }
+    if (res.status === 403 && body?.code === 'PLAN_LIMIT') {
+      throw new PlanLimitError(body?.error)
+    }
+    if (res.status === 403 && body?.code === 'PLAN_FEATURE') {
+      throw new PlanFeatureError(body?.error, body?.feature)
+    }
     if (res.status === 409 && body?.vehicleId) {
       throw new PlateConflictError({
         vehicleId: body.vehicleId,
@@ -176,7 +381,9 @@ async function api<T>(
 
 function mapStatus(s: string): JobStatus {
   if (s === 'islemde') return 'islemde'
-  if (s === 'tamamlandi' || s === 'teslim_edildi') return 'tamamlandi'
+  if (s === 'teslim_edildi') return 'teslim_edildi'
+  if (s === 'odeme_tamamlandi') return 'odeme_tamamlandi'
+  if (s === 'tamamlandi') return 'tamamlandi'
   return 'bekliyor'
 }
 
@@ -216,7 +423,7 @@ type WoDetail = {
     address?: string
     city?: string
   }
-  complaints: { id: string; description: string; createdAt: string }[]
+  complaints: { id: string; description: string; createdAt: string; category?: string }[]
   services: { id: string; title: string; price: number }[]
   parts: {
     id: string
@@ -232,7 +439,10 @@ type WoDetail = {
   assignedTo?: string | null
   laborTotal?: number
   partsTotal?: number
+  discount?: number
   grandTotal?: number
+  paidTotal?: number
+  openedAt?: string | null
   startedAt?: string | null
   closedAt?: string | null
 }
@@ -255,12 +465,14 @@ function mapWorkOrder(wo: WoDetail): Vehicle {
     km: v.mileage != null ? String(v.mileage) : '',
     status: mapStatus(wo.status),
     assignedTo: wo.assignedTo ?? undefined,
-    createdAt: new Date().toISOString(),
+    createdAt: wo.openedAt ?? new Date().toISOString(),
     startedAt: wo.startedAt ?? undefined,
     closedAt: wo.closedAt ?? undefined,
     laborTotal: wo.laborTotal != null ? Number(wo.laborTotal) : undefined,
     partsTotal: wo.partsTotal != null ? Number(wo.partsTotal) : undefined,
+    discount: wo.discount != null ? Number(wo.discount) : undefined,
     grandTotal: wo.grandTotal != null ? Number(wo.grandTotal) : undefined,
+    paidTotal: wo.paidTotal != null ? Number(wo.paidTotal) : undefined,
     customer: {
       id: c.id,
       name: c.fullName,
@@ -271,6 +483,7 @@ function mapWorkOrder(wo: WoDetail): Vehicle {
       id: k.id,
       text: k.description,
       createdAt: k.createdAt,
+      category: normalizeComplaintCategory(k.category),
     })),
     services: wo.services.map((s) => ({
       id: s.id,
@@ -292,8 +505,7 @@ function mapWorkOrder(wo: WoDetail): Vehicle {
 }
 
 export async function loginUser(
-  tenantCode: string,
-  phone: string,
+  identifier: string,
   password: string,
 ): Promise<AuthResult> {
   try {
@@ -301,27 +513,56 @@ export async function loginUser(
       token: string
       user: { id: string; fullName: string }
       activeShop?: { shopName: string; tenantCode: string; role?: string }
+      license?: any
+      entitlements?: any
     }>('/api/auth/login', {
       method: 'POST',
       body: JSON.stringify({
-        tenantCode: tenantCode.trim().toUpperCase(),
-        phone: phone.trim(),
+        identifier: identifier.trim(),
         password,
       }),
     }, false)
 
     token = res.token
+    cachedLicense = mapLicense(res.license)
+    cachedEntitlements = mapEntitlements(res.entitlements)
     await AsyncStorage.setItem(TOKEN_KEY, res.token)
     await AsyncStorage.setItem(USER_KEY, res.user.fullName)
     await AsyncStorage.setItem(USER_ID_KEY, res.user.id)
     await AsyncStorage.setItem(USER_ROLE_KEY, res.activeShop?.role ?? 'personel')
-    await AsyncStorage.setItem(TENANT_CODE_KEY, tenantCode.trim().toUpperCase())
+    if (res.activeShop?.tenantCode) {
+      await AsyncStorage.setItem(TENANT_CODE_KEY, res.activeShop.tenantCode)
+    }
     if (res.activeShop?.shopName) {
       await AsyncStorage.setItem(SHOP_NAME_KEY, res.activeShop.shopName)
     }
-    return { ok: true, name: res.user.fullName }
+    return { ok: true, name: res.user.fullName, license: cachedLicense }
   } catch (e) {
+    if (e instanceof ShopLicenseExpiredError) {
+      return { ok: false, error: e.message, licenseExpired: true }
+    }
     return { ok: false, error: e instanceof Error ? e.message : 'Giriş başarısız.' }
+  }
+}
+
+export async function fetchShopLicense(): Promise<ShopLicense | null> {
+  try {
+    const raw = await api<any>('/api/auth/license')
+    cachedLicense = mapLicense(raw)
+    return cachedLicense
+  } catch (e) {
+    if (e instanceof ShopLicenseExpiredError) throw e
+    return cachedLicense
+  }
+}
+
+export async function fetchEntitlements(): Promise<PlanEntitlements | null> {
+  try {
+    const raw = await api<any>('/api/auth/entitlements')
+    cachedEntitlements = mapEntitlements(raw)
+    return cachedEntitlements
+  } catch {
+    return cachedEntitlements
   }
 }
 
@@ -338,10 +579,32 @@ export async function initSession(): Promise<string | null> {
   if (!name || !t) return null
   try {
     await api('/api/dashboard')
+    try {
+      await fetchShopLicense()
+    } catch {
+      /* license fetch optional on boot */
+    }
+    try {
+      await fetchEntitlements()
+    } catch {
+      /* entitlements optional on boot */
+    }
     return name
-  } catch {
-    await clearSession()
-    return null
+  } catch (e) {
+    // Sadece oturum/yetki hatalarında çıkış; ağ kesintisinde token korunur
+    if (e instanceof SessionReplacedError) return null
+    if (e instanceof ShopLicenseExpiredError) return null
+    const msg = e instanceof Error ? e.message : ''
+    if (
+      msg.includes('HTTP 401') ||
+      msg.includes('HTTP 403') ||
+      msg.toLocaleLowerCase('tr').includes('unauthorized')
+    ) {
+      await clearSession()
+      return null
+    }
+    // Offline / sunucu kapalı: kayıtlı oturumu koru, uygulama yine açılsın
+    return name
   }
 }
 
@@ -397,29 +660,87 @@ export async function getStaffPerformance(date?: string, userId?: string): Promi
   return rows.map((r) => ({ ...r, revenue: Number(r.revenue) }))
 }
 
+export type PaymentPendingItem = {
+  workOrderId: string
+  vehicleId: string
+  plate: string
+  customerName: string
+  status: JobStatus
+  grandTotal: number
+  paidTotal: number
+  remaining: number
+}
+
+export type PaymentsPendingReport = {
+  count: number
+  totalRemaining: number
+  items: PaymentPendingItem[]
+}
+
+export type CashTodayReport = {
+  total: number
+  nakit: number
+  kart: number
+  havale: number
+  diger: number
+}
+
+export async function getPaymentsPending(): Promise<PaymentsPendingReport> {
+  const d = await api<{
+    count: number
+    totalRemaining: number
+    items: {
+      workOrderId: string
+      vehicleId: string
+      plate: string
+      customerName: string
+      status: string
+      grandTotal: number
+      paidTotal: number
+      remaining: number
+    }[]
+  }>('/api/reports/payments-pending')
+  return {
+    count: d.count,
+    totalRemaining: Number(d.totalRemaining),
+    items: (d.items ?? []).map((i) => ({
+      workOrderId: i.workOrderId,
+      vehicleId: i.vehicleId,
+      plate: i.plate,
+      customerName: i.customerName,
+      status: mapStatus(i.status),
+      grandTotal: Number(i.grandTotal),
+      paidTotal: Number(i.paidTotal),
+      remaining: Number(i.remaining),
+    })),
+  }
+}
+
+export async function getCashToday(): Promise<CashTodayReport> {
+  const d = await api<{
+    total: number
+    nakit: number
+    kart: number
+    havale: number
+    diger: number
+  }>('/api/reports/cash-today')
+  return {
+    total: Number(d.total),
+    nakit: Number(d.nakit),
+    kart: Number(d.kart),
+    havale: Number(d.havale),
+    diger: Number(d.diger),
+  }
+}
+
 export async function loadVehicles(): Promise<Vehicle[]> {
   const rows = await api<WoDetail[]>('/api/app/vehicles')
   return rows.map(mapWorkOrder)
 }
 
 export async function loadCustomers(): Promise<Customer[]> {
-  const rows = await api<{
-    id: string
-    fullName: string
-    phone: string
-    address?: string
-    city?: string
-    isSupplier?: boolean
-    isCustomer?: boolean
-  }[]>('/api/customers')
-  return rows.map((c) => ({
-    id: c.id,
-    name: c.fullName,
-    phone: c.phone,
-    address: c.address ?? c.city,
-    isSupplier: c.isSupplier ?? false,
-    isCustomer: c.isCustomer ?? true,
-  }))
+  const rows = await api<CustomerApiRow[]>('/api/customers')
+  return rows.map(mapCustomerRow)
 }
 
 export async function loadStock(): Promise<StockProduct[]> {
@@ -438,6 +759,9 @@ export async function loadStock(): Promise<StockProduct[]> {
     code: s.code ?? '-',
     price: Number(s.price),
     stock: s.quantity,
+    purchasePrice: (s as { purchasePrice?: number | null }).purchasePrice != null
+      ? Number((s as { purchasePrice?: number | null }).purchasePrice)
+      : undefined,
   }))
 }
 
@@ -466,6 +790,10 @@ type CustomerApiRow = {
   city?: string
   isSupplier?: boolean
   isCustomer?: boolean
+  taxNo?: string
+  openingBalance?: number
+  balance?: number
+  supplierBalance?: number
 }
 
 function mapCustomerRow(c: CustomerApiRow): Customer {
@@ -476,6 +804,10 @@ function mapCustomerRow(c: CustomerApiRow): Customer {
     address: c.address ?? c.city,
     isSupplier: c.isSupplier ?? false,
     isCustomer: c.isCustomer ?? true,
+    taxNo: c.taxNo,
+    openingBalance: c.openingBalance != null ? Number(c.openingBalance) : undefined,
+    balance: c.balance != null ? Number(c.balance) : undefined,
+    supplierBalance: c.supplierBalance != null ? Number(c.supplierBalance) : undefined,
   }
 }
 
@@ -488,21 +820,27 @@ export async function createCustomer(data: Omit<Customer, 'id'>): Promise<Custom
       address: data.address,
       isSupplier: data.isSupplier ?? false,
       isCustomer: data.isCustomer ?? true,
+      taxNo: data.taxNo || null,
+      openingBalance: data.isSupplier ? (data.openingBalance ?? 0) : 0,
     }),
   })
   return mapCustomerRow(c)
 }
 
 export async function updateCustomerApi(id: string, data: Omit<Customer, 'id'>): Promise<Customer> {
+  const body: Record<string, unknown> = {
+    fullName: data.name,
+    phone: data.phone,
+    address: data.address,
+    isSupplier: data.isSupplier ?? false,
+    isCustomer: data.isCustomer ?? true,
+    taxNo: data.taxNo || null,
+  }
+  // Açılış bakiyesini sadece tedarikçi kaydında gönder; aksi halde API sıfırlamasın.
+  if (data.isSupplier) body.openingBalance = data.openingBalance ?? 0
   const c = await api<CustomerApiRow>(`/api/customers/${id}`, {
     method: 'PUT',
-    body: JSON.stringify({
-      fullName: data.name,
-      phone: data.phone,
-      address: data.address,
-      isSupplier: data.isSupplier ?? false,
-      isCustomer: data.isCustomer ?? true,
-    }),
+    body: JSON.stringify(body),
   })
   return mapCustomerRow(c)
 }
@@ -515,6 +853,7 @@ export async function createStock(data: Omit<StockProduct, 'id'>): Promise<Stock
     code?: string
     price: number
     quantity: number
+    purchasePrice?: number | null
   }>('/api/stock', {
     method: 'POST',
     body: JSON.stringify({
@@ -523,6 +862,7 @@ export async function createStock(data: Omit<StockProduct, 'id'>): Promise<Stock
       code: data.code === '-' ? null : data.code,
       price: data.price,
       quantity: data.stock,
+      purchasePrice: data.purchasePrice ?? null,
     }),
   })
   return {
@@ -532,7 +872,78 @@ export async function createStock(data: Omit<StockProduct, 'id'>): Promise<Stock
     code: s.code ?? '-',
     price: Number(s.price),
     stock: s.quantity,
+    purchasePrice: s.purchasePrice != null ? Number(s.purchasePrice) : undefined,
   }
+}
+
+export type InvoiceScanLine = {
+  name: string
+  quantity: number
+  unitPrice: number
+  lineTotal: number
+}
+
+export type InvoiceScanResult = {
+  documentNo?: string
+  documentDate?: string
+  lines: InvoiceScanLine[]
+  provider?: string
+}
+
+export async function scanInvoiceApi(fileBase64: string, mimeType = 'application/pdf'): Promise<InvoiceScanResult> {
+  const raw = await api<{
+    documentNo?: string
+    documentDate?: string
+    lines: { name: string; quantity: number; unitPrice: number; lineTotal: number }[]
+    provider?: string
+  }>('/api/ai/scan-invoice', {
+    method: 'POST',
+    body: JSON.stringify({ fileBase64, mimeType }),
+  })
+  return {
+    documentNo: raw.documentNo,
+    documentDate: raw.documentDate,
+    provider: raw.provider,
+    lines: (raw.lines ?? []).map((l) => ({
+      name: (l.name ?? '').trim(),
+      quantity: Math.max(1, Number(l.quantity) || 1),
+      unitPrice: Number(l.unitPrice) || 0,
+      lineTotal: Number(l.lineTotal) || 0,
+    })),
+  }
+}
+
+export type ImportPurchaseLine = {
+  name: string
+  quantity: number
+  unitPrice: number
+  salePrice?: number
+  category?: StockCategory
+  code?: string
+}
+
+export async function importPurchaseApi(
+  supplierId: string,
+  lines: ImportPurchaseLine[],
+  documentNo?: string,
+  documentDate?: string,
+): Promise<{ createdCount: number; updatedCount: number; totalPurchase: number }> {
+  return api('/api/stock/import-purchase', {
+    method: 'POST',
+    body: JSON.stringify({
+      supplierId,
+      documentNo: documentNo || null,
+      documentDate: documentDate || null,
+      lines: lines.map((l) => ({
+        name: l.name,
+        quantity: l.quantity,
+        unitPrice: l.unitPrice,
+        salePrice: l.salePrice ?? l.unitPrice,
+        category: l.category ?? 'diger',
+        code: l.code || null,
+      })),
+    }),
+  })
 }
 
 export async function updateStockApi(id: string, data: Omit<StockProduct, 'id'>): Promise<StockProduct> {
@@ -565,6 +976,10 @@ export async function updateStockApi(id: string, data: Omit<StockProduct, 'id'>)
   }
 }
 
+export async function deleteStockApi(id: string): Promise<void> {
+  await api<void>(`/api/stock/${id}`, { method: 'DELETE' })
+}
+
 export async function createVehicleApi(
   customerId: string,
   plate: string,
@@ -578,6 +993,7 @@ export async function createVehicleApi(
   engineVolume: string,
   km: string,
   complaint?: string,
+  complaintCategory?: ComplaintCategory,
 ): Promise<Vehicle> {
   const res = await api<{ vehicleId: string; workOrderId: string }>('/api/vehicles', {
     method: 'POST',
@@ -594,6 +1010,7 @@ export async function createVehicleApi(
       engineVolume: engineVolume || null,
       mileage: km ? parseInt(km.replace(/\D/g, ''), 10) : null,
       complaint: complaint || null,
+      complaintCategory: complaint ? complaintCategory || 'diger' : null,
     }),
   })
   // Az önce oluşturulan iş emrini doğrudan kendi id'siyle çekiyoruz.
@@ -606,6 +1023,34 @@ export async function createVehicleApi(
 export async function refreshVehicle(workOrderId: string): Promise<Vehicle> {
   const wo = await api<WoDetail>(`/api/workorders/${workOrderId}`)
   return mapWorkOrder(wo)
+}
+
+export type ActivityLogEntry = {
+  id: number
+  action: string
+  entityType: string
+  description: string
+  userName?: string | null
+  createdAt: string
+}
+
+export async function getCustomerActivity(customerId: string): Promise<ActivityLogEntry[]> {
+  const rows = await api<{
+    id: number
+    action: string
+    entityType: string
+    description: string
+    userName?: string | null
+    createdAt: string
+  }[]>(`/api/customers/${encodeURIComponent(customerId)}/activity`)
+  return rows.map((r) => ({
+    id: r.id,
+    action: r.action,
+    entityType: r.entityType,
+    description: r.description,
+    userName: r.userName,
+    createdAt: r.createdAt,
+  }))
 }
 
 export async function loadVehiclesByCustomer(customerId: string): Promise<CustomerVehicleSummary[]> {
@@ -629,12 +1074,17 @@ export async function transferVehicleApi(
   vehicleId: string,
   newCustomerId: string,
   complaint?: string,
+  complaintCategory?: ComplaintCategory,
 ): Promise<Vehicle> {
   const res = await api<{ vehicleId: string; workOrderId: string }>(
     `/api/vehicles/${vehicleId}/transfer`,
     {
       method: 'POST',
-      body: JSON.stringify({ newCustomerId, complaint: complaint || null }),
+      body: JSON.stringify({
+        newCustomerId,
+        complaint: complaint || null,
+        complaintCategory: complaint ? complaintCategory || 'diger' : null,
+      }),
     },
   )
   return refreshVehicle(res.workOrderId)
@@ -655,26 +1105,140 @@ export async function setWorkOrderStatus(
   })
 }
 
+/** Yalnızca bekliyor (işleme alınmamış) iş emrini sistemden siler. */
+export async function deleteWaitingWorkOrder(workOrderId: string) {
+  await api(`/api/workorders/${workOrderId}`, { method: 'DELETE' })
+}
+
+export type ShopPaymentInfo = {
+  shopName: string
+  bankIban?: string | null
+  bankName?: string | null
+  accountHolder?: string | null
+}
+
+export type WorkOrderPaymentResult = {
+  grandTotal: number
+  paidTotal: number
+  discount?: number
+  paymentId?: string | null
+}
+
+export type WorkOrderPayment = {
+  id: string
+  amount: number
+  method: string
+  paidAt: string
+  receivedByName?: string | null
+}
+
+export async function getShopPaymentInfo(): Promise<ShopPaymentInfo> {
+  return api<ShopPaymentInfo>('/api/shop/payment-info')
+}
+
+export async function updateShopPaymentInfo(data: {
+  bankIban?: string | null
+  bankName?: string | null
+  accountHolder?: string | null
+}): Promise<ShopPaymentInfo> {
+  return api<ShopPaymentInfo>('/api/shop/payment-info', {
+    method: 'PUT',
+    body: JSON.stringify({
+      bankIban: data.bankIban ?? null,
+      bankName: data.bankName ?? null,
+      accountHolder: data.accountHolder ?? null,
+    }),
+  })
+}
+
+export async function listWorkOrderPayments(
+  workOrderId: string,
+): Promise<WorkOrderPayment[]> {
+  const rows = await api<WorkOrderPayment[]>(`/api/workorders/${workOrderId}/payments`)
+  return rows.map((p) => ({
+    ...p,
+    amount: Number(p.amount),
+  }))
+}
+
+export async function addWorkOrderPayment(
+  workOrderId: string,
+  amount: number,
+  method: 'nakit' | 'kart' | 'havale' | 'diger' = 'nakit',
+): Promise<WorkOrderPaymentResult> {
+  const res = await api<WorkOrderPaymentResult>(`/api/workorders/${workOrderId}/payments`, {
+    method: 'POST',
+    body: JSON.stringify({ amount, method }),
+  })
+  return {
+    grandTotal: Number(res.grandTotal),
+    paidTotal: Number(res.paidTotal),
+    discount: res.discount != null ? Number(res.discount) : undefined,
+    paymentId: res.paymentId ?? null,
+  }
+}
+
+export async function updateWorkOrderPayment(
+  workOrderId: string,
+  paymentId: string,
+  amount: number,
+  method: 'nakit' | 'kart' | 'havale' | 'diger' = 'nakit',
+): Promise<WorkOrderPaymentResult> {
+  return api<WorkOrderPaymentResult>(
+    `/api/workorders/${workOrderId}/payments/${paymentId}`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({ amount, method }),
+    },
+  )
+}
+
+export async function deleteWorkOrderPayment(
+  workOrderId: string,
+  paymentId: string,
+): Promise<WorkOrderPaymentResult> {
+  return api<WorkOrderPaymentResult>(
+    `/api/workorders/${workOrderId}/payments/${paymentId}`,
+    { method: 'DELETE' },
+  )
+}
+
+export async function updateWorkOrderDiscount(
+  workOrderId: string,
+  amount: number,
+): Promise<WorkOrderPaymentResult> {
+  return api<WorkOrderPaymentResult>(`/api/workorders/${workOrderId}/discount`, {
+    method: 'PUT',
+    body: JSON.stringify({ amount }),
+  })
+}
+
 export async function getStaffList(): Promise<StaffMember[]> {
   return api<StaffMember[]>('/api/staff')
 }
 
-export async function addComplaintApi(workOrderId: string, text: string) {
-  await api(`/api/workorders/${workOrderId}/complaints`, {
+export async function addComplaintApi(
+  workOrderId: string,
+  text: string,
+  category: ComplaintCategory = 'diger',
+): Promise<string> {
+  const res = await api<{ id: string }>(`/api/workorders/${workOrderId}/complaints`, {
     method: 'POST',
-    body: JSON.stringify({ description: text }),
+    body: JSON.stringify({ description: text, category }),
   })
+  return res.id
 }
 
 export async function addServiceApi(
   workOrderId: string,
   service: Omit<ServiceItem, 'id'>,
   force = false,
-) {
-  await api(`/api/workorders/${workOrderId}/services`, {
+): Promise<string> {
+  const res = await api<{ id: string }>(`/api/workorders/${workOrderId}/services`, {
     method: 'POST',
     body: JSON.stringify({ title: service.title, price: service.price, force }),
   })
+  return res.id
 }
 
 export async function updateServiceApi(
@@ -723,6 +1287,7 @@ export async function updatePartApi(
       name: data.name,
       quantity: data.quantity,
       unitPrice: data.price,
+      purchasePrice: data.purchasePrice ?? null,
     }),
   })
 }
@@ -735,10 +1300,15 @@ export async function returnPartToSupplier(workOrderId: string, partId: string) 
   await api(`/api/workorders/${workOrderId}/parts/${partId}/return-to-supplier`, { method: 'POST' })
 }
 
-export async function updateComplaintApi(workOrderId: string, complaintId: string, text: string) {
+export async function updateComplaintApi(
+  workOrderId: string,
+  complaintId: string,
+  text: string,
+  category: ComplaintCategory = 'diger',
+) {
   await api(`/api/workorders/${workOrderId}/complaints/${complaintId}`, {
     method: 'PUT',
-    body: JSON.stringify({ description: text }),
+    body: JSON.stringify({ description: text, category }),
   })
 }
 
@@ -754,12 +1324,19 @@ export async function getWorkOrderHistory(workOrderId: string): Promise<StatusHi
   return api<StatusHistoryEntry[]>(`/api/workorders/${workOrderId}/history`)
 }
 
-export async function openNewVisit(vehicleId: string, complaint?: string): Promise<Vehicle> {
+export async function openNewVisit(
+  vehicleId: string,
+  complaint?: string,
+  complaintCategory?: ComplaintCategory,
+): Promise<Vehicle> {
   const res = await api<{ vehicleId: string; workOrderId: string }>(
     `/api/vehicles/${vehicleId}/new-visit`,
     {
       method: 'POST',
-      body: JSON.stringify({ complaint: complaint || null }),
+      body: JSON.stringify({
+        complaint: complaint || null,
+        complaintCategory: complaint ? complaintCategory || 'diger' : null,
+      }),
     },
   )
   return refreshVehicle(res.workOrderId)
@@ -785,32 +1362,73 @@ export type WorkOrderImage = {
   imageType: string
   url: string
   createdAt: string
+  complaintId?: string
+  serviceId?: string
 }
 
 export async function getWorkOrderImages(workOrderId: string): Promise<WorkOrderImage[]> {
   return api<WorkOrderImage[]>(`/api/workorders/${workOrderId}/images`)
 }
 
+export type RuhsatScanResult = {
+  plate: string
+  brand: string
+  model: string
+  year: string
+  color: string
+  fuel: string
+  chassis: string
+  engineNo: string
+  engineVolume: string
+  provider?: string
+  modelUsed?: string
+}
+
+/** Ruhsat okuma — sunucu tarafı AI failover (Gemini → OpenAI). */
+export async function scanRuhsatApi(
+  imageBase64: string,
+  mimeType = 'image/jpeg',
+): Promise<RuhsatScanResult> {
+  const raw = await api<RuhsatScanResult>('/api/ai/scan-ruhsat', {
+    method: 'POST',
+    body: JSON.stringify({ imageBase64, mimeType }),
+  })
+  return {
+    plate: (raw.plate ?? '').trim(),
+    brand: (raw.brand ?? '').trim(),
+    model: (raw.model ?? '').trim(),
+    year: (raw.year ?? '').trim(),
+    color: (raw.color ?? '').trim(),
+    fuel: (raw.fuel ?? '').trim(),
+    chassis: (raw.chassis ?? '').trim(),
+    engineNo: (raw.engineNo ?? '').trim(),
+    engineVolume: (raw.engineVolume ?? '').trim(),
+    provider: raw.provider,
+    modelUsed: raw.modelUsed,
+  }
+}
+
 export async function uploadWorkOrderImage(
   workOrderId: string,
   imageUri: string,
   imageType: 'ruhsat' | 'arac' | 'hasar' | 'diger',
+  complaintId?: string,
+  serviceId?: string,
 ): Promise<WorkOrderImage> {
-  const fileName = imageUri.split('/').pop() || `foto-${Date.now()}.jpg`
-  const ext = fileName.includes('.') ? fileName.split('.').pop() : 'jpg'
+  // RN/Expo yeni fetch FormData'da { uri, name, type } nesnesini kabul etmiyor
+  // ("Unsupported FormDataPart implementation"). expo-file-system File + expo/fetch kullan.
+  const file = new File(imageUri)
   const form = new FormData()
-  form.append('file', {
-    uri: imageUri,
-    name: fileName,
-    type: `image/${ext === 'jpg' ? 'jpeg' : ext}`,
-  } as unknown as Blob)
+  form.append('file', file as unknown as Blob)
   form.append('imageType', imageType)
+  if (complaintId) form.append('complaintId', complaintId)
+  if (serviceId) form.append('serviceId', serviceId)
 
   const headers: Record<string, string> = {}
   const t = await loadToken()
   if (t) headers.Authorization = `Bearer ${t}`
 
-  const res = await fetch(`${API_BASE_URL}/api/workorders/${workOrderId}/images`, {
+  const res = await expoFetch(`${API_BASE_URL}/api/workorders/${workOrderId}/images`, {
     method: 'POST',
     headers,
     body: form,
@@ -837,10 +1455,18 @@ export async function ensureCustomer(data: Omit<Customer, 'id'>): Promise<Custom
 
 export type SupplierTransaction = {
   id: string
-  type: 'alis' | 'odeme' | 'iade'
+  type: 'alis' | 'odeme' | 'iade' | 'iskonto'
   amount: number
   description?: string
   createdAt: string
+  method?: string | null
+  workOrderPartId?: string | null
+  partName?: string | null
+  partQuantity?: number | null
+  purchasePrice?: number | null
+  plate?: string | null
+  workOrderId?: string | null
+  vehicleId?: string | null
 }
 
 export type SupplierLedger = {
@@ -908,14 +1534,65 @@ export async function createSupplier(data: {
   return mapSupplier(s)
 }
 
+/**
+ * SQL prosedürü yanlış encoding ile kurulunca oluşan UTF-8 mojibake'i düzeltir.
+ * Örn: "Ä°ÅŸ emri…" → "İş emri…"
+ * Not: sqlcmd CP1252 ile yazınca 0x9F baytı U+0178 (Ÿ) olur; sadece &0xff yetmez.
+ */
+const CP1252_TO_BYTE: Record<number, number> = {
+  0x20ac: 0x80, 0x201a: 0x82, 0x0192: 0x83, 0x201e: 0x84, 0x2026: 0x85,
+  0x2020: 0x86, 0x2021: 0x87, 0x02c6: 0x88, 0x2030: 0x89, 0x0160: 0x8a,
+  0x2039: 0x8b, 0x0152: 0x8c, 0x017d: 0x8e, 0x2018: 0x91, 0x2019: 0x92,
+  0x201c: 0x93, 0x201d: 0x94, 0x2022: 0x95, 0x2013: 0x96, 0x2014: 0x97,
+  0x02dc: 0x98, 0x2122: 0x99, 0x0161: 0x9a, 0x203a: 0x9b, 0x0153: 0x9c,
+  0x017e: 0x9e, 0x0178: 0x9f,
+}
+
+function fixMojibake(text?: string | null): string | undefined {
+  if (!text) return text ?? undefined
+  if (!/[ÄÃÅ]/.test(text)) return text
+  try {
+    const bytes = Uint8Array.from(Array.from(text, (ch) => {
+      const c = ch.charCodeAt(0)
+      if (c <= 0xff) return c
+      return CP1252_TO_BYTE[c] ?? (c & 0xff)
+    }))
+    const decoded = new TextDecoder('utf-8').decode(bytes)
+    if (!decoded || decoded.includes('\uFFFD')) return text
+    return decoded
+  } catch {
+    return text
+  }
+}
+
 export async function getSupplierLedger(id: string): Promise<SupplierLedger> {
   const res = await api<{
     supplier: Parameters<typeof mapSupplier>[0]
     transactions: SupplierTransaction[]
   }>(`/api/suppliers/${id}`)
+  return mapSupplierLedger(res)
+}
+
+function mapSupplierLedger(res: {
+  supplier: Parameters<typeof mapSupplier>[0]
+  transactions: SupplierTransaction[]
+}): SupplierLedger {
   return {
     supplier: mapSupplier(res.supplier),
-    transactions: res.transactions.map((t) => ({ ...t, amount: Number(t.amount) })),
+    transactions: res.transactions.map((t) => ({
+      ...t,
+      amount: Number(t.amount),
+      description: fixMojibake(t.description),
+      partName: t.partName ? fixMojibake(t.partName) : t.partName,
+      purchasePrice:
+        t.purchasePrice != null && t.purchasePrice !== undefined
+          ? Number(t.purchasePrice)
+          : t.purchasePrice,
+      partQuantity:
+        t.partQuantity != null && t.partQuantity !== undefined
+          ? Number(t.partQuantity)
+          : t.partQuantity,
+    })),
   }
 }
 
@@ -923,31 +1600,79 @@ export async function recordSupplierPayment(
   id: string,
   amount: number,
   description?: string,
+  method?: string,
 ): Promise<SupplierLedger> {
   const res = await api<{
     supplier: Parameters<typeof mapSupplier>[0]
     transactions: SupplierTransaction[]
   }>(`/api/suppliers/${id}/payments`, {
     method: 'POST',
+    body: JSON.stringify({
+      amount,
+      description: description || null,
+      method: method || null,
+    }),
+  })
+  return mapSupplierLedger(res)
+}
+
+export async function recordSupplierDiscount(
+  id: string,
+  amount: number,
+  description?: string,
+): Promise<SupplierLedger> {
+  const res = await api<{
+    supplier: Parameters<typeof mapSupplier>[0]
+    transactions: SupplierTransaction[]
+  }>(`/api/suppliers/${id}/discounts`, {
+    method: 'POST',
     body: JSON.stringify({ amount, description: description || null }),
   })
-  return {
-    supplier: mapSupplier(res.supplier),
-    transactions: res.transactions.map((t) => ({ ...t, amount: Number(t.amount) })),
-  }
+  return mapSupplierLedger(res)
+}
+
+export async function updateSupplierTransaction(
+  supplierId: string,
+  txId: string,
+  data: { amount: number; description?: string; method?: string },
+): Promise<SupplierLedger> {
+  const res = await api<{
+    supplier: Parameters<typeof mapSupplier>[0]
+    transactions: SupplierTransaction[]
+  }>(`/api/suppliers/${supplierId}/transactions/${txId}`, {
+    method: 'PUT',
+    body: JSON.stringify({
+      amount: data.amount,
+      description: data.description || null,
+      method: data.method || null,
+    }),
+  })
+  return mapSupplierLedger(res)
+}
+
+export async function deleteSupplierTransaction(
+  supplierId: string,
+  txId: string,
+): Promise<SupplierLedger> {
+  const res = await api<{
+    supplier: Parameters<typeof mapSupplier>[0]
+    transactions: SupplierTransaction[]
+  }>(`/api/suppliers/${supplierId}/transactions/${txId}`, { method: 'DELETE' })
+  return mapSupplierLedger(res)
 }
 
 export async function getSupplierReport(
-  period: 'daily' | 'weekly',
-  date: string,
+  from: string,
+  to: string,
 ): Promise<SupplierReportRow[]> {
+  const q = new URLSearchParams({ from, to })
   const rows = await api<{
     supplierId: string
     supplierName: string
     totalPurchases: number
     totalReturns: number
     transactionCount: number
-  }[]>(`/api/suppliers/report?period=${period}&date=${date}`)
+  }[]>(`/api/suppliers/report?${q}`)
   return rows.map((r) => ({
     supplierId: r.supplierId,
     supplierName: r.supplierName,
@@ -955,4 +1680,112 @@ export async function getSupplierReport(
     totalReturns: Number(r.totalReturns),
     transactionCount: r.transactionCount,
   }))
+}
+
+/* ---------------------------------------------------------------------
+   Stok / cari / satış raporları
+   ------------------------------------------------------------------- */
+
+export type StockUsageRow = {
+  stockProductId?: string | null
+  name: string
+  category?: string | null
+  totalQuantity: number
+  totalRevenue: number
+  workOrderCount: number
+}
+
+export type StockPurchaseSaleRow = {
+  stockProductId?: string | null
+  name: string
+  category?: string | null
+  totalQuantity: number
+  totalPurchaseAmount: number
+  totalSaleAmount: number
+  profit: number
+}
+
+export type StockMovementDetail = {
+  date: string
+  plate: string
+  customerName: string
+  quantity: number
+  unitPrice: number
+  purchasePrice?: number | null
+  supplierName?: string | null
+}
+
+export type AccountLedgerRow = {
+  accountId: string
+  accountName: string
+  accountType: 'musteri' | 'tedarikci'
+  totalDebit: number
+  totalCredit: number
+  movementCount: number
+  currentBalance: number
+}
+
+export type CustomerLedgerEntry = {
+  date: string
+  type: 'borc' | 'tahsilat'
+  description: string
+  amount: number
+  plate?: string | null
+}
+
+export type TopServiceRow = { title: string; count: number; totalAmount: number }
+
+export type SalesReport = {
+  workOrderCount: number
+  totalRevenue: number
+  totalPaid: number
+  totalDiscount: number
+  nakit: number
+  kart: number
+  havale: number
+  diger: number
+  topServices: TopServiceRow[]
+}
+
+export async function getStockUsageReport(from: string, to: string): Promise<StockUsageRow[]> {
+  const q = new URLSearchParams({ from, to })
+  return api<StockUsageRow[]>(`/api/reports/stock-usage?${q}`)
+}
+
+export async function getStockPurchaseSaleReport(
+  from: string,
+  to: string,
+): Promise<StockPurchaseSaleRow[]> {
+  const q = new URLSearchParams({ from, to })
+  return api<StockPurchaseSaleRow[]>(`/api/reports/stock-purchase-sale?${q}`)
+}
+
+export async function getStockMovementDetail(
+  stockProductId: string | null | undefined,
+  name: string,
+  from: string,
+  to: string,
+): Promise<StockMovementDetail[]> {
+  const q = new URLSearchParams({ name, from, to })
+  if (stockProductId) q.set('stockProductId', stockProductId)
+  return api<StockMovementDetail[]>(`/api/reports/stock-movements?${q}`)
+}
+
+export async function getAccountLedgerReport(from: string, to: string): Promise<AccountLedgerRow[]> {
+  const q = new URLSearchParams({ from, to })
+  return api<AccountLedgerRow[]>(`/api/reports/account-ledger?${q}`)
+}
+
+export async function getCustomerLedgerDetail(
+  customerId: string,
+  from: string,
+  to: string,
+): Promise<CustomerLedgerEntry[]> {
+  const q = new URLSearchParams({ customerId, from, to })
+  return api<CustomerLedgerEntry[]>(`/api/reports/customer-ledger?${q}`)
+}
+
+export async function getSalesReport(from: string, to: string): Promise<SalesReport> {
+  const q = new URLSearchParams({ from, to })
+  return api<SalesReport>(`/api/reports/sales?${q}`)
 }

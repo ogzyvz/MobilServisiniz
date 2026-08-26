@@ -5,20 +5,14 @@ namespace OtoServis.Admin.Models;
 
 public class LoginViewModel
 {
-    [Required(ErrorMessage = "Servis kodu gerekli")]
-    [Display(Name = "Servis Kodu")]
-    public string TenantCode { get; set; } = "";
-
-    [Required(ErrorMessage = "Telefon gerekli")]
-    [Display(Name = "Telefon")]
-    public string Phone { get; set; } = "";
+    [Required(ErrorMessage = "Telefon veya kullanıcı adı gerekli")]
+    [Display(Name = "Telefon veya kullanıcı adı")]
+    public string Identifier { get; set; } = "";
 
     [Required(ErrorMessage = "Şifre gerekli")]
     [DataType(DataType.Password)]
     [Display(Name = "Şifre")]
     public string Password { get; set; } = "";
-
-    public string? ShopPreviewName { get; set; }
 }
 
 public class SelectShopViewModel

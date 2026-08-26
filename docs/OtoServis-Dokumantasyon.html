@@ -324,12 +324,13 @@
 
 <h2>10. Yapay Zeka — Ruhsat Okuma</h2>
 <ul>
-  <li><strong>Sağlayıcı:</strong> Google Gemini (gemini-2.5-flash)</li>
+  <li><strong>Endpoint:</strong> POST /api/ai/scan-ruhsat (JWT)</li>
+  <li><strong>Zincir:</strong> gemini-3.5-flash-lite → gemini-3.5-flash → gpt-4o-mini → ocr/tesseract</li>
   <li><strong>Kullanım:</strong> Yeni araç kaydında ruhsat fotoğrafından otomatik okuma</li>
-  <li><strong>Okunan alanlar:</strong> Plaka, marka, model, yıl, renk, yakıt tipi, şasi no</li>
-  <li><strong>Girdi:</strong> Kamera veya galeriden fotoğraf (base64)</li>
-  <li><strong>API anahtarı:</strong> EXPO_PUBLIC_GEMINI_API_KEY veya ai-config.ts</li>
-  <li><strong>Anahtar yoksa:</strong> Uyarı gösterilir, alanlar elle doldurulabilir</li>
+  <li><strong>Okunan alanlar:</strong> Plaka, marka, model, yıl, renk, yakıt, şasi, motor no, hacim</li>
+  <li><strong>Girdi:</strong> Kamera veya galeriden fotoğraf (base64 → API)</li>
+  <li><strong>API anahtarları:</strong> sunucu appsettings.json → Ai (Gemini + opsiyonel OpenAI)</li>
+  <li><strong>Anahtar alma:</strong> Gemini https://aistudio.google.com/app/apikey — OpenAI https://platform.openai.com/api-keys</li>
 </ul>
 
 <h2>11. Demo Hesaplar</h2>

@@ -1,4 +1,9 @@
-export type JobStatus = 'bekliyor' | 'islemde' | 'tamamlandi'
+export type JobStatus =
+  | 'bekliyor'
+  | 'islemde'
+  | 'tamamlandi'
+  | 'odeme_tamamlandi'
+  | 'teslim_edildi'
 
 export interface Customer {
   id: string
@@ -7,12 +12,62 @@ export interface Customer {
   address?: string
   isSupplier?: boolean
   isCustomer?: boolean
+  /** Sadece isSupplier=true kayıtlarda anlamlıdır. */
+  taxNo?: string
+  openingBalance?: number
+  /** Müşteri alacağı: ödenmemiş iş emri kalanları. */
+  balance?: number
+  /** Tedarikçi borcu: opening + alış − ödeme − iade − iskonto. */
+  supplierBalance?: number
 }
+
+export type ComplaintCategory =
+  | 'motor'
+  | 'fren'
+  | 'elektrik'
+  | 'klima'
+  | 'suspansiyon'
+  | 'kaporta'
+  | 'lastik'
+  | 'yag_bakim'
+  | 'diagnostik'
+  | 'istek'
+  | 'diger'
+
+export const COMPLAINT_CATEGORY_LABELS: Record<ComplaintCategory, string> = {
+  motor: 'Motor',
+  fren: 'Fren',
+  elektrik: 'Elektrik',
+  klima: 'Klima',
+  suspansiyon: 'Süspansiyon',
+  kaporta: 'Kaporta / Hasar',
+  lastik: 'Lastik / Jant',
+  yag_bakim: 'Yağ / Bakım',
+  diagnostik: 'Diagnostik',
+  istek: 'İstek / Talep',
+  diger: 'Diğer',
+}
+
+/** Liste grup sırası */
+export const COMPLAINT_CATEGORY_ORDER: ComplaintCategory[] = [
+  'motor',
+  'fren',
+  'elektrik',
+  'klima',
+  'suspansiyon',
+  'kaporta',
+  'lastik',
+  'yag_bakim',
+  'diagnostik',
+  'istek',
+  'diger',
+]
 
 export interface Complaint {
   id: string
   text: string
   createdAt: string
+  category: ComplaintCategory
 }
 
 export interface ServiceItem {
@@ -55,6 +110,7 @@ export interface StockProduct {
   code: string
   price: number
   stock: number
+  purchasePrice?: number
 }
 
 export const STOCK_CATEGORY_LABELS: Record<StockCategory, string> = {
@@ -87,7 +143,9 @@ export interface Vehicle {
   closedAt?: string
   laborTotal?: number
   partsTotal?: number
+  discount?: number
   grandTotal?: number
+  paidTotal?: number
   customer: Customer
   complaints: Complaint[]
   services: ServiceItem[]
@@ -98,4 +156,6 @@ export const STATUS_LABELS: Record<JobStatus, string> = {
   bekliyor: 'Bekliyor',
   islemde: 'İşlemde',
   tamamlandi: 'Tamamlandı',
+  odeme_tamamlandi: 'Ödeme Tamamlandı',
+  teslim_edildi: 'Teslim Edildi',
 }

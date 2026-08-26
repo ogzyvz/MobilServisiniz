@@ -1,9 +1,10 @@
 import { useMemo, useState } from 'react'
-import { Pressable, ScrollView, Text, TextInput, View } from 'react-native'
-import { useSafeAreaInsets } from 'react-native-safe-area-context'
-import { Search, Plus, Phone, MapPin, Users, ArrowLeft, Pencil, Check, Truck } from 'lucide-react-native'
+import { Pressable, RefreshControl, ScrollView, Text, TextInput, View } from 'react-native'
+import { KeyboardAwareScrollView } from '@/components/keyboard-aware-scroll'
+import { Search, Plus, Phone, MapPin, Users, ArrowLeft, Pencil, Truck, BarChart3 } from 'lucide-react-native'
 import type { Customer } from '@/lib/types'
 import { TextField, TextArea } from '@/components/form-field'
+import { formatCurrency } from '@/lib/format'
 import { colors, withAlpha } from '@/lib/theme'
 import { cardShadow } from '@/components/vehicle-card'
 import { cn } from '@/lib/utils'
@@ -21,35 +22,47 @@ export function Customers({
   onAdd,
   onUpdate,
   onOpenCustomer,
+  onOpenReport,
+  onRefresh,
+  allowSuppliers = true,
 }: {
   customers: Customer[]
-  onAdd: (c: Omit<Customer, 'id'>) => void
-  onUpdate: (id: string, c: Omit<Customer, 'id'>) => void
+  onAdd: (c: Omit<Customer, 'id'>) => void | Promise<void>
+  onUpdate: (id: string, c: Omit<Customer, 'id'>) => void | Promise<void>
   onOpenCustomer: (customer: Customer) => void
+  onOpenReport: () => void
+  onRefresh?: () => Promise<void>
+  allowSuppliers?: boolean
 }) {
-  const insets = useSafeAreaInsets()
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<ContactFilter>('all')
   const [editing, setEditing] = useState<Customer | 'new' | null>(null)
+  const [refreshing, setRefreshing] = useState(false)
+
+  const filterOptions = allowSuppliers
+    ? FILTER_OPTIONS
+    : FILTER_OPTIONS.filter((o) => o.key !== 'suppliers')
 
   const filtered = useMemo(() => {
     const q = query.trim().toLocaleLowerCase('tr')
     return customers.filter((c) => {
+      if (!allowSuppliers && c.isSupplier && c.isCustomer === false) return false
       if (filter === 'suppliers' && !c.isSupplier) return false
-      if (filter === 'customers' && c.isSupplier) return false
+      if (filter === 'customers' && c.isCustomer === false) return false
       if (!q) return true
       return `${c.name} ${c.phone} ${c.address ?? ''}`.toLocaleLowerCase('tr').includes(q)
     })
-  }, [customers, query, filter])
+  }, [customers, query, filter, allowSuppliers])
 
   if (editing) {
     return (
       <CustomerForm
         initial={editing === 'new' ? null : editing}
+        allowSuppliers={allowSuppliers}
         onCancel={() => setEditing(null)}
-        onSave={(data) => {
-          if (editing === 'new') onAdd(data)
-          else onUpdate(editing.id, data)
+        onSave={async (data) => {
+          if (editing === 'new') await onAdd(data)
+          else await onUpdate(editing.id, data)
           setEditing(null)
         }}
       />
@@ -58,15 +71,24 @@ export function Customers({
 
   return (
     <View className="flex-1">
-      <View className="bg-background px-5 pb-3" style={{ paddingTop: insets.top + 16 }}>
-        <Text className="text-2xl font-extrabold tracking-tight text-foreground">
-          Müşteriler
-        </Text>
-        <Text className="mt-1 text-sm text-muted-foreground">
-          Toplam {customers.length} müşteri kayıtlı
-        </Text>
+      <View className="bg-background px-5 pb-3 pt-3">
+        <View className="flex-row items-center justify-between">
+          <Text className="text-sm text-muted-foreground">
+            Toplam {customers.length} müşteri kayıtlı
+          </Text>
+          {allowSuppliers ? (
+            <Pressable
+              onPress={onOpenReport}
+              className="h-11 w-11 items-center justify-center rounded-xl bg-secondary"
+            >
+              <BarChart3 size={20} color={colors.secondaryForeground} />
+            </Pressable>
+          ) : (
+            <View className="h-11 w-11" />
+          )}
+        </View>
 
-        <View className="mt-4 flex-row items-center gap-2 rounded-2xl border border-border bg-card px-4">
+        <View className="mt-3 flex-row items-center gap-2 rounded-2xl border border-border bg-card px-4">
           <Search size={20} color={colors.mutedForeground} />
           <TextInput
             value={query}
@@ -78,7 +100,7 @@ export function Customers({
         </View>
 
         <View className="mt-3 flex-row gap-2">
-          {FILTER_OPTIONS.map((opt) => {
+          {filterOptions.map((opt) => {
             const active = filter === opt.key
             return (
               <Pressable
@@ -109,7 +131,7 @@ export function Customers({
         >
           <Plus size={24} color={colors.accentForeground} strokeWidth={2.4} />
           <Text className="text-base font-bold text-accent-foreground">
-            Yeni Müşteri Ekle
+            Yeni Cari Ekle
           </Text>
         </Pressable>
       </View>
@@ -118,6 +140,20 @@ export function Customers({
         className="flex-1"
         contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 8, paddingBottom: 24 }}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={async () => {
+              if (!onRefresh) return
+              setRefreshing(true)
+              try {
+                await onRefresh()
+              } finally {
+                setRefreshing(false)
+              }
+            }}
+          />
+        }
       >
         {filtered.length === 0 ? (
           <View className="mt-16 items-center">
@@ -170,6 +206,38 @@ export function Customers({
                     </View>
                   ) : null}
                 </View>
+                {c.isCustomer !== false || c.isSupplier ? (
+                  <View className="items-end gap-1">
+                    {c.isCustomer !== false ? (
+                      <View className="items-end">
+                        <Text className="text-[11px] font-semibold text-muted-foreground">Alacak</Text>
+                        <Text
+                          className={
+                            (c.balance ?? 0) > 0
+                              ? 'text-sm font-extrabold text-destructive'
+                              : 'text-sm font-extrabold text-foreground'
+                          }
+                        >
+                          {formatCurrency(c.balance ?? 0)}
+                        </Text>
+                      </View>
+                    ) : null}
+                    {c.isSupplier ? (
+                      <View className="items-end">
+                        <Text className="text-[11px] font-semibold text-muted-foreground">Borç</Text>
+                        <Text
+                          className={
+                            (c.supplierBalance ?? 0) > 0
+                              ? 'text-sm font-extrabold text-destructive'
+                              : 'text-sm font-extrabold text-foreground'
+                          }
+                        >
+                          {formatCurrency(c.supplierBalance ?? 0)}
+                        </Text>
+                      </View>
+                    ) : null}
+                  </View>
+                ) : null}
                 <Pressable
                   onPress={() => setEditing(c)}
                   className="h-11 w-11 items-center justify-center rounded-xl bg-secondary"
@@ -185,46 +253,83 @@ export function Customers({
   )
 }
 
+type ContactRole = 'customer' | 'supplier' | 'both'
+
 export function CustomerForm({
   initial,
   onCancel,
   onSave,
+  allowSuppliers = true,
 }: {
   initial: Customer | null
   onCancel: () => void
-  onSave: (data: Omit<Customer, 'id'>) => void
+  onSave: (data: Omit<Customer, 'id'>) => void | Promise<void>
+  allowSuppliers?: boolean
 }) {
-  const insets = useSafeAreaInsets()
   const [name, setName] = useState(initial?.name ?? '')
   const [phone, setPhone] = useState(initial?.phone ?? '')
   const [address, setAddress] = useState(initial?.address ?? '')
-  const [isSupplier, setIsSupplier] = useState(initial?.isSupplier ?? false)
+  const [role, setRole] = useState<ContactRole>(() => {
+    if (!allowSuppliers) return 'customer'
+    if (initial?.isSupplier && initial?.isCustomer !== false) return 'both'
+    if (initial?.isSupplier) return 'supplier'
+    return 'customer'
+  })
+  const [taxNo, setTaxNo] = useState(initial?.taxNo ?? '')
+  const [openingBalance, setOpeningBalance] = useState(
+    initial?.openingBalance != null ? String(initial.openingBalance) : '',
+  )
   const [error, setError] = useState('')
+  const [saving, setSaving] = useState(false)
 
-  function handleSave() {
+  const isSupplier = allowSuppliers && (role === 'supplier' || role === 'both')
+  const isCustomer = role === 'customer' || role === 'both' || !allowSuppliers
+
+  async function handleSave() {
     if (name.trim().length < 2) {
-      setError('Lütfen müşteri adını girin.')
+      setError(isSupplier && !isCustomer ? 'Lütfen tedarikçi adını girin.' : 'Lütfen müşteri adını girin.')
       return
     }
     if (phone.trim().length < 7) {
       setError('Lütfen geçerli bir telefon girin.')
       return
     }
-    onSave({
-      name: name.trim(),
-      phone: phone.trim(),
-      address: address.trim(),
-      isSupplier,
-      isCustomer: true,
-    })
+    setSaving(true)
+    setError('')
+    try {
+      await onSave({
+        name: name.trim(),
+        phone: phone.trim(),
+        address: address.trim(),
+        isSupplier,
+        isCustomer,
+        taxNo: isSupplier ? taxNo.trim() || undefined : undefined,
+        openingBalance: isSupplier ? parseMoneyInput(openingBalance) : undefined,
+      })
+    } catch {
+      setError('Kayıt başarısız. Bilgileri kontrol edip tekrar deneyin.')
+    } finally {
+      setSaving(false)
+    }
   }
+
+  const title = initial
+    ? 'Cariyi Düzenle'
+    : role === 'supplier'
+      ? 'Yeni Tedarikçi'
+      : role === 'both'
+        ? 'Yeni Cari'
+        : 'Yeni Müşteri'
+
+  const saveLabel = initial
+    ? 'Değişiklikleri Kaydet'
+    : role === 'supplier'
+      ? 'Tedarikçiyi Kaydet'
+      : 'Kaydet'
 
   return (
     <View className="flex-1">
-      <View
-        className="flex-row items-center gap-3 bg-background px-5 pb-3"
-        style={{ paddingTop: insets.top + 16 }}
-      >
+      <View className="flex-row items-center gap-3 bg-background px-5 pb-3 pt-3">
         <Pressable
           onPress={onCancel}
           className="h-11 w-11 items-center justify-center rounded-xl bg-secondary"
@@ -232,18 +337,62 @@ export function CustomerForm({
           <ArrowLeft size={20} color={colors.secondaryForeground} />
         </Pressable>
         <Text className="text-xl font-extrabold tracking-tight text-foreground">
-          {initial ? 'Müşteriyi Düzenle' : 'Yeni Müşteri'}
+          {title}
         </Text>
       </View>
 
-      <ScrollView
+      <KeyboardAwareScrollView
         className="flex-1"
-        contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 8, paddingBottom: 24 }}
-        keyboardShouldPersistTaps="handled"
+        contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 8 }}
+        basePaddingBottom={48}
         showsVerticalScrollIndicator={false}
       >
         <View className="flex flex-col gap-4">
-          <TextField label="Ad Soyad" value={name} onChange={setName} placeholder="Örn. Ayşe Kaya" />
+          {allowSuppliers ? (
+            <View>
+              <Text className="mb-1.5 text-sm font-semibold text-muted-foreground">
+                Kayıt türü
+              </Text>
+              <View className="flex-row gap-1 rounded-2xl bg-secondary p-1">
+                {(
+                  [
+                    { key: 'customer' as const, label: 'Müşteri' },
+                    { key: 'supplier' as const, label: 'Tedarikçi' },
+                    { key: 'both' as const, label: 'Her ikisi' },
+                  ] as const
+                ).map((opt) => {
+                  const active = role === opt.key
+                  return (
+                    <Pressable
+                      key={opt.key}
+                      onPress={() => setRole(opt.key)}
+                      className={cn(
+                        'flex-1 items-center justify-center rounded-xl py-2.5',
+                        active && 'bg-card',
+                      )}
+                      style={active ? cardShadow : undefined}
+                    >
+                      <Text
+                        className={cn(
+                          'text-sm font-bold',
+                          active ? 'text-foreground' : 'text-muted-foreground',
+                        )}
+                      >
+                        {opt.label}
+                      </Text>
+                    </Pressable>
+                  )
+                })}
+              </View>
+            </View>
+          ) : null}
+
+          <TextField
+            label={isSupplier && !isCustomer ? 'Tedarikçi Adı' : 'Ad Soyad'}
+            value={name}
+            onChange={setName}
+            placeholder={isSupplier && !isCustomer ? 'Örn. ABC Oto Yedek Parça' : 'Örn. Ayşe Kaya'}
+          />
           <TextField
             label="Telefon"
             value={phone}
@@ -259,22 +408,24 @@ export function CustomerForm({
             rows={3}
           />
 
-          <Pressable
-            onPress={() => setIsSupplier((v) => !v)}
-            className="flex-row items-center gap-3 rounded-xl border border-border bg-card px-4 py-3.5"
-          >
-            <View
-              className={cn(
-                'h-6 w-6 items-center justify-center rounded-md border-2',
-                isSupplier ? 'border-accent bg-accent' : 'border-border bg-transparent',
-              )}
-            >
-              {isSupplier && <Check size={16} color={colors.accentForeground} strokeWidth={3} />}
+          {isSupplier ? (
+            <View className="flex-row gap-3">
+              <TextField
+                label="Vergi No (isteğe bağlı)"
+                value={taxNo}
+                onChange={setTaxNo}
+                className="flex-1"
+              />
+              <TextField
+                label="Açılış Bakiyesi (₺)"
+                value={openingBalance}
+                onChange={setOpeningBalance}
+                inputMode="numeric"
+                placeholder="0"
+                className="flex-1"
+              />
             </View>
-            <Text className="flex-1 text-sm font-semibold text-foreground">
-              Aynı zamanda tedarikçi
-            </Text>
-          </Pressable>
+          ) : null}
 
           {error !== '' && (
             <View className="rounded-xl bg-destructive/10 px-4 py-3">
@@ -284,17 +435,33 @@ export function CustomerForm({
 
           <Pressable
             onPress={handleSave}
-            className="mt-1 h-14 items-center justify-center rounded-xl bg-primary active:opacity-95"
+            disabled={saving}
+            className={cn(
+              'mt-1 h-14 items-center justify-center rounded-xl bg-primary active:opacity-95',
+              saving && 'opacity-70',
+            )}
             style={primaryShadow}
           >
             <Text className="text-base font-extrabold text-primary-foreground">
-              {initial ? 'Değişiklikleri Kaydet' : 'Müşteriyi Kaydet'}
+              {saving ? 'Kaydediliyor…' : saveLabel}
             </Text>
           </Pressable>
         </View>
-      </ScrollView>
+      </KeyboardAwareScrollView>
     </View>
   )
+}
+
+/** "1.250,50" / "1250,50" / "1250.50" → number */
+function parseMoneyInput(raw: string): number {
+  const t = raw.trim().replace(/\s/g, '')
+  if (!t) return 0
+  const normalized =
+    t.includes(',') && t.includes('.')
+      ? t.replace(/\./g, '').replace(',', '.')
+      : t.replace(',', '.')
+  const n = Number(normalized)
+  return Number.isFinite(n) ? n : 0
 }
 
 function initials(name: string) {

@@ -2,18 +2,31 @@
   "expo": {
     "name": "MobilServisiniz",
     "slug": "mobilservisiniz",
-    "version": "1.0.6",
+    "version": "1.0.27",
     "orientation": "default",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.otoservis.app",
+      "buildNumber": "1",
+      "infoPlist": {
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": true
+        },
+        "NSCameraUsageDescription": "Ruhsatı çekip araç bilgilerini otomatik doldurmak için kamera erişimi gereklidir.",
+        "NSPhotoLibraryUsageDescription": "Ruhsat fotoğrafını seçmek için galeri erişimi gereklidir."
+      }
     },
     "android": {
       "package": "com.otoservis.app",
-      "versionCode": 7,
+      "versionCode": 28,
+      "softwareKeyboardLayoutMode": "resize",
+      "permissions": [
+        "REQUEST_INSTALL_PACKAGES"
+      ],
       "adaptiveIcon": {
-        "backgroundColor": "#2f4a86",
+        "backgroundColor": "#1e3a6e",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
@@ -37,10 +50,18 @@
         {
           "android": {
             "usesCleartextTraffic": true
+          },
+          "ios": {
+            "infoPlist": {
+              "NSAppTransportSecurity": {
+                "NSAllowsArbitraryLoads": true
+              }
+            }
           }
         }
       ],
-      "expo-sharing"
+      "expo-sharing",
+      "@react-native-community/datetimepicker"
     ]
   }
 }

@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8" />
+  <title>MobilServisiniz — Kullanım Rehberi</title>
+  <style>
+    @page { size: A4; margin: 18mm 16mm; }
+    * { box-sizing: border-box; }
+    body {
+      font-family: "Segoe UI", Tahoma, Arial, sans-serif;
+      color: #1a1f2e;
+      font-size: 11pt;
+      line-height: 1.45;
+      margin: 0;
+    }
+    h1 {
+      font-size: 22pt;
+      margin: 0 0 6px;
+      color: #2f4a86;
+    }
+    h2 {
+      font-size: 14pt;
+      margin: 22px 0 8px;
+      padding-bottom: 4px;
+      border-bottom: 2px solid #2f4a86;
+      color: #2f4a86;
+      page-break-after: avoid;
+    }
+    h3 {
+      font-size: 12pt;
+      margin: 14px 0 6px;
+      color: #1f7a8c;
+      page-break-after: avoid;
+    }
+    p, li { margin: 0 0 6px; }
+    ul { margin: 0 0 10px; padding-left: 18px; }
+    .hero {
+      background: linear-gradient(135deg, #2f4a86, #1f7a8c);
+      color: #fff;
+      padding: 22px 20px;
+      border-radius: 12px;
+      margin-bottom: 18px;
+    }
+    .hero p { opacity: 0.92; margin: 0; }
+    .meta { font-size: 9.5pt; opacity: 0.85; margin-top: 8px; }
+    .box {
+      background: #f4f6fa;
+      border: 1px solid #dde0e7;
+      border-radius: 10px;
+      padding: 10px 12px;
+      margin: 10px 0;
+    }
+    .tip {
+      background: #fff7ed;
+      border-left: 4px solid #e07d33;
+      padding: 8px 12px;
+      margin: 10px 0;
+    }
+    .ok {
+      background: #edf8f1;
+      border-left: 4px solid #3f9a5d;
+      padding: 8px 12px;
+      margin: 10px 0;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 8px 0 12px;
+      font-size: 10.5pt;
+    }
+    th, td {
+      border: 1px solid #dde0e7;
+      padding: 7px 8px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th { background: #eef2f9; color: #2f4a86; }
+    .flow {
+      font-family: Consolas, "Courier New", monospace;
+      font-size: 9.5pt;
+      background: #1a1f2e;
+      color: #e8ecf4;
+      padding: 12px 14px;
+      border-radius: 10px;
+      white-space: pre-wrap;
+      line-height: 1.5;
+    }
+    .footer {
+      margin-top: 28px;
+      padding-top: 10px;
+      border-top: 1px solid #dde0e7;
+      font-size: 9pt;
+      color: #6c7288;
+    }
+    .badge {
+      display: inline-block;
+      background: #2f4a86;
+      color: #fff;
+      font-size: 9pt;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 999px;
+      margin-right: 4px;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="hero">
+    <h1 style="color:#fff;border:0;margin:0 0 8px">MobilServisiniz</h1>
+    <p><strong>Kullanım Rehberi</strong> — Oto servis mobil uygulaması</p>
+    <p class="meta">Sürüm notu: Temmuz 2026 · Servis personeli ve yöneticiler için</p>
+  </div>
+
+  <div class="box">
+    <strong>Alt menü:</strong>
+    Ana Sayfa · Araçlar · Müşteri · Stok · (+) Yeni Kayıt
+  </div>
+
+  <h2>1. Giriş</h2>
+  <ol>
+    <li><strong>Servis Kodu</strong> girin (ör. OTO-IST). Doğruysa servis adı görünür.</li>
+    <li><strong>Telefon</strong> ve <strong>Şifre</strong> ile <strong>Giriş Yap</strong>.</li>
+    <li>İsterseniz <strong>Beni hatırla</strong> işaretleyin.</li>
+  </ol>
+  <div class="tip">Yeni kullanıcı hesabı uygulamadan açılmaz; yönetici tarafından tanımlanır. Aynı hesap başka telefonda açılırsa önceki oturum kapanabilir.</div>
+
+  <h2>2. Ana Sayfa</h2>
+  <ul>
+    <li><strong>Bekleyen / İşlemde / Biten</strong> kartları — listeyi filtreler.</li>
+    <li><strong>Bu ay</strong> özeti — araç ve işlem sayısı.</li>
+    <li><strong>Bugün tahsilat</strong> — Nakit / Kart / Havale toplamları.</li>
+    <li><strong>Ödeme bekleyen</strong> — işi bitmiş ama kalanı olan araçlar; satıra basınca detaya gider.</li>
+    <li><strong>Yeni Araç Kaydı</strong> — ruhsat fotoğrafı ile hızlı kayıt.</li>
+    <li><strong>IBAN Ekle / Düzenle</strong> — havale paylaşımında kullanılan servis IBAN’ı.</li>
+    <li><strong>Son Araçlar</strong> · <strong>Tümünü Gör</strong>.</li>
+  </ul>
+
+  <h2>3. Yeni Araç Kaydı</h2>
+  <p>4 adımlı akış:</p>
+  <ol>
+    <li><strong>Ruhsat</strong> — Kamera veya galeri; yapay zeka alanları doldurur. Elle de girebilirsiniz.</li>
+    <li><strong>Araç</strong> — Plaka, marka, model, yıl, renk, yakıt, km, şasi, motor…</li>
+    <li><strong>Müşteri</strong> — Kayıtlı müşteri seçin veya yeni ekleyin.</li>
+    <li><strong>Şikayet</strong> — Müşteri şikayetini yazıp <strong>Kaydı Tamamla</strong>.</li>
+  </ol>
+  <div class="ok">Ruhsat okuma sunucuda yapılır; internet bağlantısı gerekir.</div>
+
+  <h2>4. Araç / İş Emri Yaşam Döngüsü</h2>
+  <p>Önerilen sıra:</p>
+  <div class="flow">Bekliyor
+  → İşleme Al
+  → İşlemi Tamamla
+  → Ödeme Al (gerekirse birden fazla)
+  → Ödeme Tamamlandı   (kalan 0 ise otomatik)
+  → Müşteriye Teslim Et</div>
+
+  <table>
+    <thead>
+      <tr><th>Durum</th><th>Ne yapılır?</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><strong>Bekliyor</strong></td><td><strong>İşleme Al</strong> — sorumlu personel seçilir.</td></tr>
+      <tr><td><strong>İşlemde</strong></td><td>Şikayet / işlem / ürün eklenir. Bitince <strong>İşlemi Tamamla</strong>.</td></tr>
+      <tr><td><strong>Tamamlandı</strong></td><td><strong>Ödeme Al</strong> ve/veya <strong>IBAN Paylaş</strong>. Kalan 0 olunca durum otomatik <strong>Ödeme Tamamlandı</strong> olur.</td></tr>
+      <tr><td><strong>Ödeme Tamamlandı</strong></td><td><strong>Müşteriye Teslim Et</strong>.</td></tr>
+      <tr><td><strong>Teslim Edildi</strong></td><td>İş kapanır. Gerekirse <strong>Yeni Servis Kaydı</strong>.</td></tr>
+    </tbody>
+  </table>
+
+  <div class="tip">
+    <strong>Ödeme Al</strong> = kasaya para kaydı (nakit / kart / havale).<br />
+    <strong>Ödeme Tamamlandı</strong> = süreç durumu (“ödeme bitti”).
+  </div>
+  <p>Ödeme alınmadan teslim edilmek istenirse uygulama uyarı verir; yine de devam edilebilir.</p>
+
+  <h2>5. Araç Detay Sekmeleri</h2>
+  <ul>
+    <li><strong>Bilgiler</strong> — araç ve müşteri bilgileri.</li>
+    <li><strong>Şikayet</strong> — şikayet ekle / düzenle; fotoğraf eklenebilir.</li>
+    <li><strong>İşlemler</strong> — yapılan iş + işçilik ücreti; fotoğraf eklenebilir.</li>
+    <li><strong>Ürünler</strong> — <strong>Stoktan Kullanıldı</strong> veya <strong>Dışarıdan Alındı</strong> (tedarikçi). İade: <strong>Tedarikçiye İade Et</strong>.</li>
+  </ul>
+  <p>Altta işçilik + malzeme + toplam (ödenen / kalan) özeti görünür.</p>
+
+  <h3>Paylaşım</h3>
+  <ul>
+    <li><strong>WhatsApp'tan Paylaş</strong></li>
+    <li><strong>Detay Paylaş</strong> (metin)</li>
+    <li><strong>PDF Paylaş</strong></li>
+    <li><strong>IBAN Paylaş</strong> — servis IBAN’ı + tutar + plaka + müşteri (Alıcı adı dahil)</li>
+  </ul>
+
+  <h2>6. Müşteri / Tedarikçi</h2>
+  <ul>
+    <li>Filtre: <strong>Tümü</strong> · <strong>Müşteriler</strong> · <strong>Tedarikçiler</strong></li>
+    <li><strong>Yeni Cari Ekle</strong> — Müşteri / Tedarikçi / Her ikisi</li>
+    <li>Müşteri detayında araçlar, bakiye, ödeme / hareketler</li>
+    <li><strong>Tedarikçi Raporu</strong> — günlük / haftalık / tarih aralığı alış-iade özeti</li>
+  </ul>
+
+  <h2>7. Stok</h2>
+  <ul>
+    <li>Kategori filtreleri: Yağ, Filtre, Fren, Lastik, Elektrik, Diğer</li>
+    <li><strong>Ürün Ekle</strong> / düzenle — ad, kod, fiyat, stok adedi</li>
+    <li>Düşük stok uyarısı</li>
+    <li><strong>Dışarıdan Temin</strong> — tedarikçi seç → PDF yükle veya manuel satır → kontrol et → stoğa ve cariye kaydet</li>
+  </ul>
+
+  <h2>8. Sık Sorulanlar</h2>
+  <h3>İş tamamlandıktan sonra işlem ekleyemiyorum</h3>
+  <p>Tamamlanmış işlerde ekleme kısıtlanabilir. Aynı gün içinde durum geri alınabilir; farklı günde <strong>Yeni Servis Kaydı</strong> açın.</p>
+
+  <h3>IBAN Paylaş “tanımlı değil” diyor</h3>
+  <p>Ana sayfadan <strong>IBAN Ekle</strong> ile servis IBAN’ını kaydedin.</p>
+
+  <h3>Ödeme bekleyen listesinde araç görünüyor</h3>
+  <p>İş bitmiş (tamamlandı / ödeme tamamlandı / teslim) ama kalan tutar &gt; 0 demektir. Detaya girip <strong>Ödeme Al</strong> yapın.</p>
+
+  <h3>Tek cihazda oturum</h3>
+  <p>Aynı kullanıcı başka telefonda giriş yaparsa önceki oturum geçersiz olabilir; yeniden giriş yapın.</p>
+
+  <div class="footer">
+    MobilServisiniz Kullanım Rehberi · Bu belge servis personeli eğitimi içindir.<br />
+    Destek: kendi servis yöneticiniz veya sistem yöneticiniz.
+  </div>
+
+</body>
+</html>

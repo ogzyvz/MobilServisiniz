@@ -11,23 +11,25 @@ Web (Next.js) sürümündeki "MobilServisiniz" araç servis kayıt uygulamasın�
 - **expo-sqlite** — cihazda kalıcı yerel veritabanı
 - **expo-crypto** — parola özetleme (SHA-256) ile giriş/kayıt
 - **expo-image-picker** — ruhsat fotoğrafı (kamera + galeri)
-- **Google Gemini** (vision) — ruhsattan araç bilgilerini otomatik okuma
+- **Sunucu AI failover** — ruhsattan araç bilgilerini otomatik okuma (Gemini → OpenAI)
 
 ## Yapay Zekâ ile Ruhsat Okuma
 
-Yeni araç kaydında "Ruhsat Fotoğrafı Çek" veya "Galeriden Seç" ile çekilen ruhsat
-fotoğrafı Google Gemini görsel modeline gönderilir; plaka, marka, model, yıl,
-renk, yakıt ve şasi alanları otomatik doldurulur. Kod: `src/lib/ai-scan.ts`.
+Yeni araç kaydında ruhsat fotoğrafı **API’ye** gönderilir; sunucu sırayla:
 
-**Kurulum (zorunlu):** Ücretsiz bir Gemini API anahtarı alın
-(<https://aistudio.google.com/app/apikey>) ve şu iki yoldan biriyle tanımlayın:
+1. `gemini-3.5-flash-lite` (ücretsiz, güncel)
+2. `gemini-3.5-flash` (ücretsiz yedek)
+3. `gpt-4o-mini` (OpenAI, kota bitince)
+4. Sunucu OCR (Tesseract) — AI başarısız olursa
 
-- `src/lib/ai-config.ts` içindeki `GEMINI_API_KEY` sabitine yapıştırın, **veya**
-- Proje kökünde `.env` dosyası oluşturup `EXPO_PUBLIC_GEMINI_API_KEY=...` yazın.
+Kod: mobil `src/lib/ai-scan.ts` → `POST /api/ai/scan-ruhsat`.
 
-Anahtar derleme sırasında pakete gömülür; değiştirdikten sonra APK'yı yeniden
-derleyin. Anahtar tanımlı değilse tarama sırasında açıklayıcı bir uyarı gösterilir
-ve bilgiler elle girilebilir (akış çalışmaya devam eder).
+**Anahtarlar sunucuda** (`api/OtoServis.Api/appsettings.json` → `Ai`):
+
+- Gemini: [aistudio.google.com/app/apikey](https://aistudio.google.com/app/apikey)
+- OpenAI (opsiyonel): [platform.openai.com/api-keys](https://platform.openai.com/api-keys)
+
+Anahtar değişince sadece API’yi yeniden başlatın; APK gerekmez.
 
 ## Veritabanı
 

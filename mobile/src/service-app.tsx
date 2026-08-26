@@ -1,12 +1,18 @@
 import { useEffect, useMemo, useState } from 'react'
 
-import { ActivityIndicator, Alert, BackHandler, Pressable, Text, View } from 'react-native'
+import { ActivityIndicator, Alert, BackHandler, View } from 'react-native'
 
-import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import { LogOut } from 'lucide-react-native'
 
-import { Home, Car, Plus, Users, Package, Truck } from 'lucide-react-native'
+import { AppShell, HeaderLogoutButton, type MainTabKey } from '@/components/app-shell'
 
-import { cn } from '@/lib/utils'
+import { AppSheet, SheetActionList, SheetCancelButton } from '@/components/app-modal'
+
+import { ForceUpdateScreen, SoftUpdateSheet } from '@/screens/force-update'
+
+import { evaluateUpdateGate, type AppUpdateInfo } from '@/lib/app-update'
+
+import { colors } from '@/lib/theme'
 
 import type {
 
@@ -26,13 +32,29 @@ import type {
 
 } from '@/lib/types'
 
-import { colors } from '@/lib/theme'
-
 import {
 
   initSession,
 
   clearSession,
+
+  setSessionInvalidatedHandler,
+
+  setLicenseExpiredHandler,
+
+  getCachedLicense,
+
+  getCachedEntitlements,
+
+  fetchShopLicense,
+
+  fetchEntitlements,
+
+  type PlanEntitlements,
+
+  SessionReplacedError,
+
+  type ShopLicense,
 
   loadCustomers,
 
@@ -44,15 +66,17 @@ import {
 
   loginUser,
 
-  registerUser,
-
   createCustomer,
+
+  uploadWorkOrderImage,
 
   updateCustomerApi,
 
   createStock,
 
   updateStockApi,
+
+  deleteStockApi,
 
   createVehicleApi,
 
@@ -65,6 +89,12 @@ import {
   refreshVehicle,
 
   setWorkOrderStatus,
+  deleteWaitingWorkOrder,
+
+  addWorkOrderPayment,
+  updateWorkOrderPayment,
+  deleteWorkOrderPayment,
+  updateWorkOrderDiscount,
 
   addComplaintApi,
 
@@ -87,8 +117,6 @@ import {
   getStaffList,
 
   listSuppliers,
-
-  createSupplier,
 
   returnPartToSupplier,
 
@@ -132,9 +160,11 @@ import { CustomerDetail } from '@/screens/customer-detail'
 
 import { Products } from '@/screens/products'
 
-import { Suppliers } from '@/screens/suppliers'
+import { SupplierImport } from '@/screens/supplier-import'
 
 import { SupplierReport } from '@/screens/supplier-report'
+
+import { StockReports } from '@/screens/stock-reports'
 
 
 
@@ -146,16 +176,21 @@ type View_ =
   | 'customers'
   | 'products'
   | 'customerDetail'
-  | 'suppliers'
   | 'supplierReport'
-
-type IconType = typeof Home
-
-
+  | 'supplierImport'
+  | 'stockReports'
 
 function reportError(e: unknown) {
 
   console.warn('MobilServisiniz API hatası:', e)
+
+  if (e instanceof SessionReplacedError) {
+
+    Alert.alert('Oturum sonlandı', e.message)
+
+    return
+
+  }
 
   if (e instanceof PhoneConflictError) {
 
@@ -191,9 +226,17 @@ function toUiCatalog(items: ServiceCatalogItem[]): UiCatalogItem[] {
 
 export function ServiceApp() {
 
-  const insets = useSafeAreaInsets()
-
   const [ready, setReady] = useState(false)
+
+  const [forceUpdate, setForceUpdate] = useState<{
+    info: AppUpdateInfo
+    currentCode: number
+  } | null>(null)
+
+  const [softUpdate, setSoftUpdate] = useState<{
+    info: AppUpdateInfo
+    currentCode: number
+  } | null>(null)
 
   const [user, setUser] = useState<string | null>(null)
 
@@ -214,6 +257,9 @@ export function ServiceApp() {
   const [busy, setBusy] = useState(false)
 
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null)
+  const [shopLicense, setShopLicense] = useState<ShopLicense | null>(null)
+
+  const [entitlements, setEntitlements] = useState<PlanEntitlements | null>(null)
 
   const [staff, setStaff] = useState<StaffMember[]>([])
 
@@ -221,9 +267,14 @@ export function ServiceApp() {
 
   const [vehicleListFilter, setVehicleListFilter] = useState<VehicleListFilter>('all')
 
+  const [logoutOpen, setLogoutOpen] = useState(false)
+
 
 
   async function reloadAll() {
+    const canStock = getCachedEntitlements()?.features.stock ?? entitlements?.features.stock ?? true
+    const canSuppliers =
+      getCachedEntitlements()?.features.suppliers ?? entitlements?.features.suppliers ?? true
 
     const [v, c, s, cat, st, sup] = await Promise.all([
 
@@ -231,13 +282,13 @@ export function ServiceApp() {
 
       loadCustomers(),
 
-      loadStock(),
+      canStock ? loadStock() : Promise.resolve([] as StockProduct[]),
 
       loadServiceCatalog(),
 
       getStaffList(),
 
-      listSuppliers(),
+      canSuppliers ? listSuppliers() : Promise.resolve([] as Supplier[]),
 
     ])
 
@@ -258,9 +309,20 @@ export function ServiceApp() {
 
 
   function reloadSuppliers() {
-
-    listSuppliers().then(setSuppliers).catch(reportError)
-
+    // Tedarikçi bakiyesini etkileyen işlemlerden sonra hem `suppliers`
+    // (parça ekranındaki tedarikçi seçici için) hem de `customers`
+    // (Müşteriler ekranındaki birleşik cari bakiyesi için) yenilenir.
+    const canSuppliers =
+      getCachedEntitlements()?.features.suppliers ?? entitlements?.features.suppliers ?? true
+    Promise.all([
+      canSuppliers ? listSuppliers() : Promise.resolve([] as Supplier[]),
+      loadCustomers(),
+    ])
+      .then(([sup, cust]) => {
+        setSuppliers(sup)
+        setCustomers(cust)
+      })
+      .catch(reportError)
   }
 
 
@@ -269,9 +331,40 @@ export function ServiceApp() {
 
     let active = true
 
+    const resetLocal = () => {
+      if (!active) return
+      setUser(null)
+      setCurrentUser(null)
+      setShopLicense(null)
+      setEntitlements(null)
+      setVehicles([])
+      setCustomers([])
+      setStock([])
+      setStaff([])
+      setSuppliers([])
+      setCatalog([])
+      setView('dashboard')
+      setSelectedId(null)
+      setSelectedCustomerId(null)
+    }
+
+    setSessionInvalidatedHandler(resetLocal)
+    setLicenseExpiredHandler(resetLocal)
+
     ;(async () => {
 
       try {
+
+        const gate = await evaluateUpdateGate()
+        if (!active) return
+        if (gate.kind === 'force') {
+          setForceUpdate({ info: gate.info, currentCode: gate.currentCode })
+          setReady(true)
+          return
+        }
+        if (gate.kind === 'soft') {
+          setSoftUpdate({ info: gate.info, currentCode: gate.currentCode })
+        }
 
         const saved = await initSession()
 
@@ -282,6 +375,11 @@ export function ServiceApp() {
           setUser(saved)
 
           setCurrentUser(await getCurrentUser())
+          setShopLicense(getCachedLicense())
+          setEntitlements(getCachedEntitlements())
+          if (!getCachedEntitlements()) {
+            setEntitlements(await fetchEntitlements())
+          }
 
           await reloadAll()
 
@@ -302,6 +400,8 @@ export function ServiceApp() {
     return () => {
 
       active = false
+      setSessionInvalidatedHandler(null)
+      setLicenseExpiredHandler(null)
 
     }
 
@@ -334,7 +434,15 @@ export function ServiceApp() {
 
       if (view === 'supplierReport') {
 
-        setView('suppliers')
+        setView('customers')
+
+        return true
+
+      }
+
+      if (view === 'supplierImport') {
+
+        setView('products')
 
         return true
 
@@ -378,45 +486,32 @@ export function ServiceApp() {
 
 
 
-  async function handleLogin(tenantCode: string, phone: string, password: string): Promise<AuthResult> {
+  async function handleLogin(identifier: string, password: string): Promise<AuthResult> {
 
-    const res = await loginUser(tenantCode, phone, password)
+    const res = await loginUser(identifier, password)
 
     if (res.ok) {
 
       setUser(res.name)
 
       setCurrentUser(await getCurrentUser())
+      setShopLicense(res.license ?? getCachedLicense())
+      setEntitlements(getCachedEntitlements())
 
       try {
-
+        if (!getCachedEntitlements()) {
+          setEntitlements(await fetchEntitlements())
+        }
         await reloadAll()
-
+        const lic = await fetchShopLicense()
+        if (lic) setShopLicense(lic)
       } catch (e) {
-
         reportError(e)
-
       }
 
     }
 
     return res
-
-  }
-
-
-
-  async function handleRegister(
-
-    name: string,
-
-    phone: string,
-
-    password: string,
-
-  ): Promise<AuthResult> {
-
-    return registerUser()
 
   }
 
@@ -454,13 +549,33 @@ export function ServiceApp() {
 
   async function replaceVehicle(updated: Vehicle) {
 
-    setVehicles((prev) => prev.map((v) => (v.id === updated.id ? updated : v)))
+    setVehicles((prev) => {
+      const idx = prev.findIndex((v) => v.id === updated.id)
+      if (idx < 0) return [updated, ...prev]
+      const next = [...prev]
+      next[idx] = updated
+      return next
+    })
 
+  }
+
+  async function openPendingWorkOrder(workOrderId: string, vehicleId: string) {
+    setBusy(true)
+    try {
+      const fresh = await refreshVehicle(workOrderId)
+      await replaceVehicle(fresh)
+      setSelectedId(fresh.id || vehicleId)
+      setView('detail')
+    } catch (e) {
+      reportError(e)
+    } finally {
+      setBusy(false)
+    }
   }
 
 
 
-  async function withWo<T>(vehicleId: string, fn: (woId: string) => Promise<T>, reloadStock = false) {
+  async function withWo<T>(vehicleId: string, fn: (woId: string) => Promise<T>, reloadStock = false): Promise<T> {
 
     const v = vehicles.find((x) => x.id === vehicleId)
 
@@ -470,7 +585,7 @@ export function ServiceApp() {
 
     try {
 
-      await fn(v.workOrderId)
+      const result = await fn(v.workOrderId)
 
       const fresh = await refreshVehicle(v.workOrderId)
 
@@ -484,6 +599,8 @@ export function ServiceApp() {
 
       }
 
+      return result
+
     } finally {
 
       setBusy(false)
@@ -494,7 +611,7 @@ export function ServiceApp() {
 
 
 
-  async function addVehicle(vehicle: Vehicle) {
+  async function addVehicle(vehicle: Vehicle, opts?: { ruhsatUri?: string }) {
 
     setBusy(true)
 
@@ -548,7 +665,17 @@ export function ServiceApp() {
 
         vehicle.complaints[0]?.text,
 
+        vehicle.complaints[0]?.category,
+
       )
+
+      if (opts?.ruhsatUri && created.workOrderId) {
+        try {
+          await uploadWorkOrderImage(created.workOrderId, opts.ruhsatUri, 'ruhsat')
+        } catch (uploadErr) {
+          reportError(uploadErr)
+        }
+      }
 
       setVehicles((prev) => [created, ...prev])
 
@@ -584,13 +711,13 @@ export function ServiceApp() {
 
 
 
-  async function transferVehicle(vehicleId: string, newCustomerId: string, complaint: string) {
+  async function transferVehicle(vehicleId: string, newCustomerId: string, complaint: string, complaintCategory?: import("@/lib/types").ComplaintCategory) {
 
     setBusy(true)
 
     try {
 
-      const created = await transferVehicleApi(vehicleId, newCustomerId, complaint || undefined)
+      const created = await transferVehicleApi(vehicleId, newCustomerId, complaint || undefined, complaintCategory)
 
       setVehicles((prev) => [created, ...prev])
 
@@ -612,17 +739,27 @@ export function ServiceApp() {
 
 
 
-  function addComplaint(id: string, text: string) {
+  async function addComplaint(id: string, text: string, category: import("@/lib/types").ComplaintCategory = "diger"): Promise<string | undefined> {
 
-    withWo(id, (woId) => addComplaintApi(woId, text)).catch(reportError)
+    try {
+
+      return await withWo(id, (woId) => addComplaintApi(woId, text, category))
+
+    } catch (e) {
+
+      reportError(e)
+
+      return undefined
+
+    }
 
   }
 
 
 
-  function updateComplaint(id: string, complaintId: string, text: string) {
+  function updateComplaint(id: string, complaintId: string, text: string, category: import("@/lib/types").ComplaintCategory = "diger") {
 
-    withWo(id, (woId) => updateComplaintApi(woId, complaintId, text)).catch(reportError)
+    withWo(id, (woId) => updateComplaintApi(woId, complaintId, text, category)).catch(reportError)
 
   }
 
@@ -653,20 +790,17 @@ export function ServiceApp() {
 
 
   function handleLogout() {
+    setLogoutOpen(true)
+  }
 
-    Alert.alert('Çıkış Yap', 'Çıkış yapmak istediğinize emin misiniz?', [
-
-      { text: 'İptal', style: 'cancel' },
-
-      { text: 'Çıkış Yap', style: 'destructive', onPress: () => performLogout() },
-
-    ])
-
+  function confirmLogout() {
+    setLogoutOpen(false)
+    performLogout()
   }
 
 
 
-  async function openNewVisitForVehicle(id: string, complaint?: string) {
+  async function openNewVisitForVehicle(id: string, complaint?: string, complaintCategory?: import("@/lib/types").ComplaintCategory) {
 
     const v = vehicles.find((x) => x.id === id)
 
@@ -676,7 +810,7 @@ export function ServiceApp() {
 
     try {
 
-      const fresh = await openNewVisit(v.id, complaint)
+      const fresh = await openNewVisit(v.id, complaint, complaintCategory)
 
       await replaceVehicle(fresh)
 
@@ -696,7 +830,7 @@ export function ServiceApp() {
 
 
 
-  function addService(id: string, service: Omit<ServiceItem, 'id'>, force?: boolean) {
+  function addService(id: string, service: Omit<ServiceItem, 'id'>, force?: boolean): Promise<string> {
 
     return withWo(id, (woId) => addServiceApi(woId, service, force))
 
@@ -729,9 +863,7 @@ export function ServiceApp() {
 
 
   function updateProduct(id: string, productId: string, data: Omit<ProductItem, 'id'>) {
-
-    withWo(id, (woId) => updatePartApi(woId, productId, data), true).catch(reportError)
-
+    return withWo(id, (woId) => updatePartApi(woId, productId, data), true)
   }
 
 
@@ -766,99 +898,167 @@ export function ServiceApp() {
 
   }
 
+  async function deleteWaitingVehicle(id: string) {
+    const v = vehicles.find((x) => x.id === id)
+    if (!v?.workOrderId) throw new Error('İş emri bulunamadı.')
+    await deleteWaitingWorkOrder(v.workOrderId)
+    setSelectedId(null)
+    setView('vehicles')
+    await reloadAll()
+  }
+
+  function addPayment(
+    id: string,
+    amount: number,
+    method: 'nakit' | 'kart' | 'havale',
+  ) {
+    return withWo(id, (woId) => addWorkOrderPayment(woId, amount, method))
+  }
+
+  function updatePayment(
+    id: string,
+    paymentId: string,
+    amount: number,
+    method: 'nakit' | 'kart' | 'havale',
+  ) {
+    return withWo(id, (woId) => updateWorkOrderPayment(woId, paymentId, amount, method))
+  }
+
+  function deletePayment(id: string, paymentId: string) {
+    return withWo(id, (woId) => deleteWorkOrderPayment(woId, paymentId))
+  }
+
+  function updateDiscount(id: string, amount: number) {
+    return withWo(id, (woId) => updateWorkOrderDiscount(woId, amount))
+  }
 
 
-  function addCustomer(data: Omit<Customer, 'id'>) {
+
+  async function addCustomer(data: Omit<Customer, 'id'>) {
 
     setBusy(true)
 
-    createCustomer(data)
+    try {
 
-      .then((c) => setCustomers((prev) => [c, ...prev]))
+      const c = await createCustomer(data)
 
-      .catch(reportError)
+      setCustomers((prev) => [c, ...prev])
 
-      .finally(() => setBusy(false))
+    } catch (e) {
+
+      reportError(e)
+
+      throw e
+
+    } finally {
+
+      setBusy(false)
+
+    }
 
   }
 
 
 
-  function updateCustomer(id: string, data: Omit<Customer, 'id'>) {
+  async function updateCustomer(id: string, data: Omit<Customer, 'id'>) {
 
     setBusy(true)
 
-    updateCustomerApi(id, data)
+    try {
 
-      .then((c) => setCustomers((prev) => prev.map((x) => (x.id === id ? c : x))))
+      const c = await updateCustomerApi(id, data)
 
-      .catch(reportError)
+      setCustomers((prev) => prev.map((x) => (x.id === id ? c : x)))
 
-      .finally(() => setBusy(false))
+    } catch (e) {
+
+      reportError(e)
+
+      throw e
+
+    } finally {
+
+      setBusy(false)
+
+    }
 
   }
 
 
 
-  function addStockItem(data: Omit<StockProduct, 'id'>) {
+  async function addStockItem(data: Omit<StockProduct, 'id'>) {
 
     setBusy(true)
 
-    createStock(data)
+    try {
 
-      .then((p) => setStock((prev) => [p, ...prev]))
+      const p = await createStock(data)
 
-      .catch(reportError)
+      setStock((prev) => [p, ...prev])
 
-      .finally(() => setBusy(false))
+    } catch (e) {
+
+      reportError(e)
+
+      throw e
+
+    } finally {
+
+      setBusy(false)
+
+    }
 
   }
 
 
 
-  function updateStockItem(id: string, data: Omit<StockProduct, 'id'>) {
+  async function updateStockItem(id: string, data: Omit<StockProduct, 'id'>) {
 
     setBusy(true)
 
-    updateStockApi(id, data)
+    try {
 
-      .then((p) => setStock((prev) => prev.map((x) => (x.id === id ? p : x))))
+      const p = await updateStockApi(id, data)
 
-      .catch(reportError)
+      setStock((prev) => prev.map((x) => (x.id === id ? p : x)))
 
-      .finally(() => setBusy(false))
+    } catch (e) {
+
+      reportError(e)
+
+      throw e
+
+    } finally {
+
+      setBusy(false)
+
+    }
 
   }
 
 
 
-  function addSupplier(data: {
-
-    name: string
-
-    contact?: string
-
-    phone?: string
-
-    email?: string
-
-    address?: string
-
-    taxNo?: string
-
-    openingBalance?: number
-
-  }) {
+  async function deleteStockItem(id: string) {
 
     setBusy(true)
 
-    createSupplier(data)
+    try {
 
-      .then((s) => setSuppliers((prev) => [s, ...prev]))
+      await deleteStockApi(id)
 
-      .catch(reportError)
+      setStock((prev) => prev.filter((x) => x.id !== id))
 
-      .finally(() => setBusy(false))
+    } catch (e) {
+
+      reportError(e)
+
+      throw e
+
+    } finally {
+
+      setBusy(false)
+
+    }
 
   }
 
@@ -878,414 +1078,278 @@ export function ServiceApp() {
 
   }
 
-
+  if (forceUpdate) {
+    return (
+      <ForceUpdateScreen
+        info={forceUpdate.info}
+        currentCode={forceUpdate.currentCode}
+      />
+    )
+  }
 
   if (!user) {
 
-    return <Login onLogin={handleLogin} onRegister={handleRegister} />
+    return (
+      <View className="flex-1">
+        <Login onLogin={handleLogin} />
+        {softUpdate ? (
+          <SoftUpdateSheet
+            visible
+            info={softUpdate.info}
+            currentCode={softUpdate.currentCode}
+            onClose={() => setSoftUpdate(null)}
+          />
+        ) : null}
+      </View>
+    )
 
   }
 
 
 
-  const navItems = [
+  const activeTab: MainTabKey =
+    view === 'detail'
+      ? 'vehicles'
+      : view === 'customerDetail' || view === 'supplierReport'
+        ? 'customers'
+        : view === 'supplierImport' || view === 'stockReports'
+          ? 'products'
+          : view === 'new'
+            ? 'new'
+            : view === 'dashboard' || view === 'vehicles' || view === 'customers' || view === 'products'
+              ? view
+              : 'dashboard'
 
-    { key: 'dashboard' as const, label: 'Ana Sayfa', icon: Home },
+  const shellTitle =
+    view === 'dashboard'
+      ? 'Ana Sayfa'
+      : view === 'vehicles'
+        ? 'Araçlar'
+        : view === 'customers'
+          ? 'Müşteriler'
+          : view === 'products'
+            ? 'Stok'
+            : view === 'supplierImport'
+              ? 'Dışarıdan Temin'
+              : view === 'stockReports'
+                ? 'Stok Raporları'
+                : view === 'detail'
+                  ? selected?.plate || 'Araç Detay'
+                  : view === 'customerDetail'
+                    ? selectedCustomer?.name || 'Müşteri'
+                    : view === 'supplierReport'
+                      ? 'Tedarikçi Raporu'
+                      : 'Yeni Kayıt'
 
-    { key: 'vehicles' as const, label: 'Araçlar', icon: Car },
+  const shellSubtitle =
+    view === 'detail' && selected
+      ? `${selected.brand} ${selected.model}`
+      : view === 'supplierReport'
+        ? 'Tedarikçi bazlı alış ve iade özeti'
+        : undefined
 
-    { key: 'customers' as const, label: 'Müşteri', icon: Users },
+  const shellOnBack =
+    view === 'detail'
+      ? () => setView('vehicles')
+      : view === 'customerDetail' || view === 'supplierReport'
+        ? () => setView('customers')
+        : view === 'supplierImport' || view === 'stockReports'
+          ? () => setView('products')
+          : view === 'new'
+            ? () => setView('dashboard')
+            : undefined
 
-    { key: 'products' as const, label: 'Stok', icon: Package },
-
-    { key: 'suppliers' as const, label: 'Cariler', icon: Truck },
-
-  ]
-
-
-
-  const showNav =
-
-    view !== 'new' &&
-
-    view !== 'detail' &&
-
-    view !== 'customerDetail' &&
-
-    view !== 'supplierReport'
-
-
+  function handleNav(tab: MainTabKey) {
+    if (tab === 'new') {
+      setView('new')
+      return
+    }
+    if (tab === 'products' && entitlements?.features.stock === false) {
+      Alert.alert(
+        'Paket özelliği',
+        'Stok yönetimi Profesyonel veya Kurumsal pakette vardır.',
+      )
+      return
+    }
+    if (tab === 'vehicles') openVehicleList(vehicleListFilter)
+    else setView(tab)
+  }
 
   return (
-
     <View className="flex-1 bg-background">
-
       {busy && (
-
         <View className="absolute inset-0 z-50 items-center justify-center bg-black/20">
-
           <ActivityIndicator size="large" color={colors.primary} />
-
         </View>
-
       )}
 
-      <View className="flex-1">
-
+      <AppShell
+        title={shellTitle}
+        subtitle={shellSubtitle}
+        onBack={shellOnBack}
+        headerRight={
+          view === 'dashboard' ? <HeaderLogoutButton onPress={handleLogout} /> : undefined
+        }
+        activeTab={activeTab}
+        onNavigate={handleNav}
+        showStock={entitlements?.features.stock !== false}
+      >
         {view === 'dashboard' && (
-
           <Dashboard
-
             vehicles={vehicles}
-
             userName={user}
-
             currentUser={currentUser}
-
+            license={shopLicense}
             onLogout={handleLogout}
-
             onOpenVehicle={openVehicle}
-
+            onOpenPendingWorkOrder={openPendingWorkOrder}
             onNewVehicle={() => setView('new')}
-
             onSeeAll={() => openVehicleList('all')}
-
-            onFilterStatus={openVehicleList}
-
+            onRefresh={async () => {
+              await reloadAll()
+              try {
+                const lic = await fetchShopLicense()
+                setShopLicense(lic)
+              } catch {
+                /* ignore */
+              }
+            }}
           />
-
         )}
-
-
 
         {view === 'vehicles' && (
-
           <VehicleList
-
             vehicles={vehicles}
-
             onOpenVehicle={openVehicle}
-
             onNewVehicle={() => setView('new')}
-
             initialFilter={vehicleListFilter}
-
+            onRefresh={reloadAll}
           />
-
         )}
-
-
 
         {view === 'customers' && (
-
           <Customers
-
             customers={customers}
-
             onAdd={addCustomer}
-
             onUpdate={updateCustomer}
-
             onOpenCustomer={openCustomer}
-
+            onOpenReport={() => setView('supplierReport')}
+            onRefresh={reloadAll}
+            allowSuppliers={entitlements?.features.suppliers !== false}
           />
-
         )}
-
-
 
         {view === 'customerDetail' && selectedCustomer && (
-
           <CustomerDetail
-
             customer={selectedCustomer}
-
             onBack={() => setView('customers')}
-
             onUpdate={updateCustomer}
-
             onOpenVehicle={openVehicle}
-
-          />
-
-        )}
-
-
-
-        {view === 'products' && (
-
-          <Products products={stock} onAdd={addStockItem} onUpdate={updateStockItem} />
-
-        )}
-
-
-
-        {view === 'suppliers' && (
-
-          <Suppliers
-
-            suppliers={suppliers}
-
-            onAdd={addSupplier}
-
             onChanged={reloadSuppliers}
-
-            onOpenReport={() => setView('supplierReport')}
-
+            allowSuppliers={entitlements?.features.suppliers !== false}
           />
-
         )}
 
-
-
-        {view === 'supplierReport' && (
-
-          <SupplierReport onBack={() => setView('suppliers')} />
-
+        {view === 'products' && entitlements?.features.stock !== false && (
+          <Products
+            products={stock}
+            onAdd={addStockItem}
+            onUpdate={updateStockItem}
+            onDelete={deleteStockItem}
+            onRefresh={reloadAll}
+            onImportPurchase={() => setView('supplierImport')}
+            onOpenReports={() => setView('stockReports')}
+          />
         )}
 
+        {view === 'supplierImport' && entitlements?.features.stock !== false && (
+          <SupplierImport
+            onCancel={() => setView('products')}
+            onDone={async () => {
+              await reloadAll()
+              setView('products')
+            }}
+          />
+        )}
 
+        {view === 'stockReports' && (
+          <StockReports onBack={() => setView('products')} />
+        )}
+
+        {view === 'supplierReport' && entitlements?.features.suppliers !== false && (
+          <SupplierReport onBack={() => setView('customers')} />
+        )}
 
         {view === 'detail' && selected && (
-
           <VehicleDetail
-
             vehicle={selected}
-
             serviceCatalog={catalog.length > 0 ? catalog : undefined}
-
             currentUser={currentUser}
-
             staff={staff}
-
             onBack={() => setView('vehicles')}
-
-            onAddComplaint={(text) => addComplaint(selected.id, text)}
-
-            onUpdateComplaint={(complaintId, text) => updateComplaint(selected.id, complaintId, text)}
-
+            onAddComplaint={(text, category) => addComplaint(selected.id, text, category)}
+            onUpdateComplaint={(complaintId, text, category) => updateComplaint(selected.id, complaintId, text, category)}
             onAddService={(s, force) => addService(selected.id, s, force)}
-
             onUpdateService={(sid, s) => updateService(selected.id, sid, s)}
-
             onDeleteService={(sid) => deleteService(selected.id, sid)}
-
             onAddProduct={(p, force) => addProduct(selected.id, p, force)}
-
             onUpdateProduct={(pid, p) => updateProduct(selected.id, pid, p)}
-
             onDeleteProduct={(pid) => deleteProduct(selected.id, pid)}
-
             onReturnProductToSupplier={(pid) => returnProductToSupplier(selected.id, pid)}
-
             onSetStatus={(status, assignment) => setStatus(selected.id, status, assignment)}
-
+            onAddPayment={(amount, method) => addPayment(selected.id, amount, method)}
+            onUpdatePayment={(paymentId, amount, method) =>
+              updatePayment(selected.id, paymentId, amount, method)
+            }
+            onDeletePayment={(paymentId) => deletePayment(selected.id, paymentId)}
+            onUpdateDiscount={(amount) => updateDiscount(selected.id, amount)}
             onOpenNewVisit={(complaint) => openNewVisitForVehicle(selected.id, complaint)}
-
+            onDeleteWaiting={() => deleteWaitingVehicle(selected.id)}
           />
-
         )}
-
-
 
         {view === 'new' && (
-
           <NewVehicleFlow
-
             customers={customers}
-
             onCancel={() => setView('dashboard')}
-
             onComplete={addVehicle}
-
             onTransferConflict={transferVehicle}
-
           />
-
         )}
-
-      </View>
-
-
-
-      {showNav && (
-
-        <View
-
-          className="flex-row items-center justify-around border-t border-border bg-card px-2 pt-2"
-
-          style={{ paddingBottom: insets.bottom + 8, ...navShadow }}
-
-        >
-
-          {navItems.slice(0, 2).map((item) => (
-
-            <NavButton
-
-              key={item.key}
-
-              label={item.label}
-
-              icon={item.icon}
-
-              active={view === item.key}
-
-              onPress={() => setView(item.key)}
-
-            />
-
-          ))}
-
-
-
-          <Pressable onPress={() => setView('new')} className="items-center px-2">
-
-            <View
-
-              className="h-14 w-14 items-center justify-center rounded-2xl bg-accent border-4 border-background"
-
-              style={{ transform: [{ translateY: -16 }], ...accentShadow }}
-
-            >
-
-              <Plus size={28} color={colors.accentForeground} strokeWidth={2.5} />
-
-            </View>
-
-            <Text className="text-xs font-semibold text-accent" style={{ marginTop: -8 }}>
-
-              Yeni Kayıt
-
-            </Text>
-
-          </Pressable>
-
-
-
-          {navItems.slice(2).map((item) => (
-
-            <NavButton
-
-              key={item.key}
-
-              label={item.label}
-
-              icon={item.icon}
-
-              active={view === item.key}
-
-              onPress={() => setView(item.key)}
-
-            />
-
-          ))}
-
-        </View>
-
-      )}
-
-    </View>
-
-  )
-
-}
-
-
-
-function NavButton({
-
-  label,
-
-  icon: Icon,
-
-  active,
-
-  onPress,
-
-}: {
-
-  label: string
-
-  icon: IconType
-
-  active: boolean
-
-  onPress: () => void
-
-}) {
-
-  return (
-
-    <Pressable
-
-      onPress={onPress}
-
-      className="min-w-14 items-center gap-1 rounded-xl px-2 py-2"
-
-    >
-
-      <Icon
-
-        size={24}
-
-        color={active ? colors.primary : colors.mutedForeground}
-
-        strokeWidth={active ? 2.4 : 2}
-
-      />
-
-      <Text
-
-        className={cn(
-
-          'text-xs font-semibold',
-
-          active ? 'text-primary' : 'text-muted-foreground',
-
-        )}
-
+      </AppShell>
+
+      <AppSheet
+        visible={logoutOpen}
+        onClose={() => setLogoutOpen(false)}
+        title="Çıkış Yap"
+        subtitle="Hesabınızdan çıkış yapmak istediğinize emin misiniz?"
       >
+        <SheetActionList
+          onClose={() => setLogoutOpen(false)}
+          actions={[
+            {
+              key: 'logout',
+              label: 'Çıkış Yap',
+              description: 'Oturumu kapat ve giriş ekranına dön',
+              icon: LogOut,
+              tone: 'destructive',
+              onPress: confirmLogout,
+            },
+          ]}
+        />
+        <SheetCancelButton onPress={() => setLogoutOpen(false)} label="Vazgeç" />
+      </AppSheet>
 
-        {label}
-
-      </Text>
-
-    </Pressable>
-
+      {softUpdate ? (
+        <SoftUpdateSheet
+          visible
+          info={softUpdate.info}
+          currentCode={softUpdate.currentCode}
+          onClose={() => setSoftUpdate(null)}
+        />
+      ) : null}
+    </View>
   )
-
-}
-
-
-
-const navShadow = {
-
-  shadowColor: '#000000',
-
-  shadowOffset: { width: 0, height: -4 },
-
-  shadowOpacity: 0.05,
-
-  shadowRadius: 20,
-
-  elevation: 12,
-
-}
-
-
-
-const accentShadow = {
-
-  shadowColor: '#e07d33',
-
-  shadowOffset: { width: 0, height: 6 },
-
-  shadowOpacity: 0.4,
-
-  shadowRadius: 12,
-
-  elevation: 8,
-
 }
 
 

@@ -38,6 +38,7 @@ module.exports = {
         border: '#dde0e7',
         input: '#dde0e7',
         ring: '#2f4a86',
+        'chart-2': '#1f7a8c',
         'chart-4': '#3f9a5d',
       },
       fontFamily: {

@@ -99,7 +99,7 @@ IF NOT EXISTS (SELECT 1 FROM dbo.ref_subscription_plans)
 IF NOT EXISTS (SELECT 1 FROM dbo.ref_work_order_status)
     INSERT INTO dbo.ref_work_order_status (code, label, sort_order, is_terminal) VALUES
     (N'bekliyor',N'Bekliyor',1,0),(N'islemde',N'İşlemde',2,0),(N'tamamlandi',N'Tamamlandı',3,0),
-    (N'teslim_edildi',N'Teslim Edildi',4,1),(N'iptal',N'İptal',5,1);
+    (N'odeme_tamamlandi',N'Ödeme Tamamlandı',4,1),(N'teslim_edildi',N'Teslim Edildi',5,1),(N'iptal',N'İptal',6,1);
 
 IF NOT EXISTS (SELECT 1 FROM dbo.ref_fuel_types)
     INSERT INTO dbo.ref_fuel_types (code, label, sort_order) VALUES
@@ -202,6 +202,7 @@ BEGIN
         email           nvarchar(150)    NULL,
         password_hash   nvarchar(128)    NOT NULL,
         default_shop_id uniqueidentifier NULL,             -- son seçilen / varsayılan servis
+        session_id      uniqueidentifier NULL,             -- aktif mobil oturum (tek cihaz)
         is_active       bit              NOT NULL CONSTRAINT DF_users_active DEFAULT 1,
         last_login_at   datetime2(0)     NULL,
         created_at      datetime2(0)     NOT NULL CONSTRAINT DF_users_created DEFAULT SYSUTCDATETIME(),
@@ -527,11 +528,16 @@ IF OBJECT_ID(N'dbo.complaints', N'U') IS NULL
         shop_id uniqueidentifier NOT NULL,
         work_order_id uniqueidentifier NOT NULL,
         description nvarchar(1000) NOT NULL,
+        category nvarchar(30) NOT NULL CONSTRAINT DF_complaints_category DEFAULT N'diger',
         is_resolved bit NOT NULL DEFAULT 0,
         created_at datetime2(0) NOT NULL DEFAULT SYSUTCDATETIME(),
         CONSTRAINT PK_complaints PRIMARY KEY (id),
         CONSTRAINT FK_complaints_shop FOREIGN KEY (shop_id) REFERENCES dbo.shops(id),
-        CONSTRAINT FK_complaints_wo FOREIGN KEY (work_order_id) REFERENCES dbo.work_orders(id) ON DELETE CASCADE
+        CONSTRAINT FK_complaints_wo FOREIGN KEY (work_order_id) REFERENCES dbo.work_orders(id) ON DELETE CASCADE,
+        CONSTRAINT CK_complaints_category CHECK (category IN (
+            N'motor', N'fren', N'elektrik', N'klima', N'suspansiyon',
+            N'kaporta', N'lastik', N'yag_bakim', N'diagnostik', N'istek', N'diger'
+        ))
     );
 GO
 

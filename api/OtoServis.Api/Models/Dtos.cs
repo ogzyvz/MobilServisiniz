@@ -1,6 +1,15 @@
 namespace OtoServis.Api.Models;
 
-public record LoginRequest(string TenantCode, string Phone, string Password);
+/// <summary>
+/// Giriş: telefon veya kullanıcı adı + şifre.
+/// TenantCode isteğe bağlı (eski istemciler / çoklu servis seçimi için).
+/// Identifier veya Phone alanlarından biri yeterlidir.
+/// </summary>
+public record LoginRequest(
+    string Password,
+    string? Identifier = null,
+    string? Phone = null,
+    string? TenantCode = null);
 public record SelectShopRequest(Guid ShopId);
 public record ShopPreviewDto(Guid ShopId, string TenantCode, string ShopName, string? City);
 
@@ -8,7 +17,31 @@ public record AuthResponse(
     string Token,
     UserDto User,
     IReadOnlyList<ShopMembershipDto> Shops,
-    ShopMembershipDto? ActiveShop);
+    ShopMembershipDto? ActiveShop,
+    ShopLicenseDto? License = null,
+    PlanEntitlementsDto? Entitlements = null);
+
+public record ShopLicenseDto(
+    string LicenseType,
+    DateTime? LicenseExpiresAt,
+    string LicenseStatus,
+    int? DaysRemaining);
+
+public record PlanFeaturesDto(
+    bool Stock,
+    bool Suppliers,
+    bool StaffPerformance,
+    bool AiRuhsat,
+    bool AiInvoice,
+    bool ApiAccess);
+
+public record PlanEntitlementsDto(
+    string PlanCode,
+    string PlanLabel,
+    decimal MonthlyPrice,
+    int? MaxUsers,
+    int? MaxVehiclesPerMonth,
+    PlanFeaturesDto Features);
 
 public record UserDto(Guid Id, string FullName, string Phone, string? Email);
 
@@ -43,7 +76,13 @@ public record CustomerDto(
     string? Address,
     string? City,
     bool IsSupplier = false,
-    bool IsCustomer = true);
+    bool IsCustomer = true,
+    string? TaxNo = null,
+    decimal? OpeningBalance = null,
+    /// <summary>Müşteri alacağı: ödenmemiş iş emri kalanları toplamı.</summary>
+    decimal? Balance = null,
+    /// <summary>Tedarikçi borcu: opening + alış − ödeme − iade − iskonto.</summary>
+    decimal? SupplierBalance = null);
 
 public record CreateCustomerRequest(
     string FullName,
@@ -54,7 +93,9 @@ public record CreateCustomerRequest(
     string? Address = null,
     string? City = null,
     bool IsSupplier = false,
-    bool IsCustomer = true);
+    bool IsCustomer = true,
+    string? TaxNo = null,
+    decimal? OpeningBalance = null);
 
 public record UpdateCustomerRequest(
     string FullName,
@@ -65,7 +106,9 @@ public record UpdateCustomerRequest(
     string? Address = null,
     string? City = null,
     bool IsSupplier = false,
-    bool IsCustomer = true);
+    bool IsCustomer = true,
+    string? TaxNo = null,
+    decimal? OpeningBalance = null);
 
 public class CustomerPhoneConflictException()
     : Exception("Bu telefon numarasıyla kayıtlı bir müşteri zaten var.");
@@ -76,7 +119,8 @@ public record CreateStockRequest(
     string? Code = null,
     decimal Price = 0,
     int Quantity = 0,
-    int MinQuantity = 0);
+    int MinQuantity = 0,
+    decimal? PurchasePrice = null);
 
 public record UpdateStockRequest(
     string Name,
@@ -84,10 +128,41 @@ public record UpdateStockRequest(
     string? Code,
     decimal Price,
     int Quantity,
-    int MinQuantity);
+    int MinQuantity,
+    decimal? PurchasePrice = null);
+
+public record ScanInvoiceRequest(string FileBase64, string? MimeType = "application/pdf");
+
+public record InvoiceScanLineDto(string Name, int Quantity, decimal UnitPrice, decimal LineTotal);
+
+public record InvoiceScanResponse(
+    string? DocumentNo,
+    string? DocumentDate,
+    IReadOnlyList<InvoiceScanLineDto> Lines,
+    string? Provider = null);
+
+public record ImportPurchaseLineRequest(
+    string Name,
+    int Quantity,
+    decimal UnitPrice,
+    decimal? SalePrice = null,
+    string Category = "diger",
+    string? Code = null);
+
+public record ImportPurchaseRequest(
+    Guid SupplierId,
+    IReadOnlyList<ImportPurchaseLineRequest> Lines,
+    string? DocumentNo = null,
+    string? DocumentDate = null);
+
+public record ImportPurchaseResponse(
+    int CreatedCount,
+    int UpdatedCount,
+    decimal TotalPurchase,
+    Guid? LedgerTransactionId);
 
 public record UpdateServiceRequest(string Title, decimal Price);
-public record UpdatePartRequest(string Name, int Quantity, decimal UnitPrice);
+public record UpdatePartRequest(string Name, int Quantity, decimal UnitPrice, decimal? PurchasePrice = null);
 
 public record CreateVehicleResponse(Guid VehicleId, Guid WorkOrderId, VehicleDto Vehicle);
 
@@ -119,7 +194,8 @@ public record CreateVehicleRequest(
     string? EngineNo = null,
     string? EngineVolume = null,
     int? Mileage = null,
-    string? Complaint = null);
+    string? Complaint = null,
+    string? ComplaintCategory = null);
 
 public record VehicleConflictDto(
     Guid VehicleId,
@@ -134,7 +210,10 @@ public class VehiclePlateConflictException(VehicleConflictDto conflict)
     public VehicleConflictDto Conflict { get; } = conflict;
 }
 
-public record TransferVehicleRequest(Guid NewCustomerId, string? Complaint = null);
+public record TransferVehicleRequest(
+    Guid NewCustomerId,
+    string? Complaint = null,
+    string? ComplaintCategory = null);
 public record TransferVehicleResponse(Guid VehicleId, Guid WorkOrderId);
 
 public record ServiceCatalogDto(
@@ -172,10 +251,11 @@ public record WorkOrderDetailDto(
     decimal GrandTotal,
     decimal PaidTotal,
     string? AssignedTo,
+    DateTime OpenedAt = default,
     DateTime? StartedAt = null,
     DateTime? ClosedAt = null);
 
-public record ComplaintDto(Guid Id, string Description, DateTime CreatedAt);
+public record ComplaintDto(Guid Id, string Description, DateTime CreatedAt, string Category = "diger");
 public record ServiceLineDto(Guid Id, string Title, decimal Price);
 public record PartLineDto(
     Guid Id,
@@ -195,7 +275,8 @@ public record StockProductDto(
     string? Code,
     decimal Price,
     int Quantity,
-    int MinQuantity);
+    int MinQuantity,
+    decimal? PurchasePrice = null);
 
 public record AddServiceRequest(Guid? ServiceCatalogId, string Title, decimal Price, bool Force = false);
 public record AddPartRequest(
@@ -207,16 +288,82 @@ public record AddPartRequest(
     Guid? SupplierId = null,
     decimal? PurchasePrice = null,
     bool Force = false);
-public record AddComplaintRequest(string Description);
-public record UpdateComplaintRequest(string Description);
+public record AddComplaintRequest(string Description, string? Category = null);
+public record UpdateComplaintRequest(string Description, string? Category = null);
 public record UpdateStatusRequest(string Status, Guid? AssignedUserId = null, string? AssignedUserName = null);
 
+public record ShopPaymentInfoDto(string ShopName, string? BankIban, string? BankName, string? AccountHolder);
+
+public record AppUpdateInfoDto(
+    string LatestVersion,
+    int LatestVersionCode,
+    int MinVersionCode,
+    string? ApkUrl,
+    string? ReleaseNotes);
+
+public record UpdateShopPaymentInfoRequest(
+    string? BankIban = null,
+    string? BankName = null,
+    string? AccountHolder = null);
+
+public record RecordWorkOrderPaymentRequest(decimal Amount, string Method = "nakit");
+
+public record UpdateWorkOrderPaymentRequest(decimal Amount, string Method = "nakit");
+
+public record WorkOrderPaymentDto(
+    Guid Id,
+    decimal Amount,
+    string Method,
+    DateTime PaidAt,
+    string? ReceivedByName);
+
+public record WorkOrderPaymentResultDto(
+    decimal GrandTotal,
+    decimal PaidTotal,
+    decimal Discount = 0,
+    Guid? PaymentId = null);
+
+public record UpdateWorkOrderDiscountRequest(decimal Amount);
+
+public record PaymentPendingItemDto(
+    Guid WorkOrderId,
+    Guid VehicleId,
+    string Plate,
+    string CustomerName,
+    string Status,
+    decimal GrandTotal,
+    decimal PaidTotal,
+    decimal Remaining);
+
+public record PaymentsPendingReportDto(
+    int Count,
+    decimal TotalRemaining,
+    IReadOnlyList<PaymentPendingItemDto> Items);
+
+public record CashTodayReportDto(
+    decimal Total,
+    decimal Nakit,
+    decimal Kart,
+    decimal Havale,
+    decimal Diger);
+
+public record ActivityLogEntryDto(
+    long Id,
+    string Action,
+    string EntityType,
+    string Description,
+    string? UserName,
+    DateTime CreatedAt);
+
 public class WorkOrderCompletedException() : Exception("Bu iş tamamlanmış.");
+
+public class StockInUseException()
+    : Exception("Bu ürün daha önce iş emrinde kullanılmış veya alım/satım hareketi görmüş. Önce ilgili hareketleri (iş emri parçası vb.) silin, sonra stoktan silebilirsiniz.");
 
 public class WorkOrderReopenBlockedException()
     : Exception("Bu iş farklı bir günde tamamlandı, durumu geri alamazsınız. Yeni bir servis kaydı açabilirsiniz.");
 
-public record OpenNewVisitRequest(string? Complaint = null);
+public record OpenNewVisitRequest(string? Complaint = null, string? ComplaintCategory = null);
 public record OpenNewVisitResponse(Guid VehicleId, Guid WorkOrderId);
 
 public record WorkOrderStatusHistoryDto(
@@ -226,7 +373,7 @@ public record WorkOrderStatusHistoryDto(
     DateTime ChangedAt,
     string? ChangedByName);
 
-public record WorkOrderImageDto(Guid Id, string ImageType, string Url, DateTime CreatedAt);
+public record WorkOrderImageDto(Guid Id, string ImageType, string Url, DateTime CreatedAt, Guid? ComplaintId = null, Guid? ServiceId = null);
 
 public class ImageTooLargeException() : Exception("Fotoğraf 5MB'den büyük olamaz.");
 public class ImageLimitExceededException() : Exception("Bu iş emri için fotoğraf limiti (8) doldu.");
@@ -254,10 +401,110 @@ public record CreateSupplierRequest(
     string? TaxNo = null,
     decimal OpeningBalance = 0);
 
-public record SupplierTransactionDto(Guid Id, string Type, decimal Amount, string? Description, DateTime CreatedAt);
+public record SupplierTransactionDto(
+    Guid Id,
+    string Type,
+    decimal Amount,
+    string? Description,
+    DateTime CreatedAt,
+    string? Method = null,
+    Guid? WorkOrderPartId = null,
+    string? PartName = null,
+    int? PartQuantity = null,
+    decimal? PurchasePrice = null,
+    string? Plate = null,
+    Guid? WorkOrderId = null,
+    Guid? VehicleId = null);
+
 public record SupplierLedgerDto(SupplierDto Supplier, IReadOnlyList<SupplierTransactionDto> Transactions);
-public record RecordSupplierPaymentRequest(decimal Amount, string? Description);
+public record RecordSupplierPaymentRequest(
+    decimal Amount,
+    string? Description = null,
+    string? Method = null);
+
+public record RecordSupplierDiscountRequest(decimal Amount, string? Description = null);
+
+public record UpdateSupplierTransactionRequest(
+    decimal Amount,
+    string? Description = null,
+    string? Method = null);
 public record SupplierReportRow(Guid SupplierId, string SupplierName, decimal TotalPurchases, decimal TotalReturns, int TransactionCount);
+
+/// <summary>Tarih aralığında en çok kullanılan/satılan stok ürünleri (miktar bazlı sıralı).</summary>
+public record StockUsageReportRow(
+    Guid? StockProductId,
+    string Name,
+    string? Category,
+    int TotalQuantity,
+    decimal TotalRevenue,
+    int WorkOrderCount);
+
+/// <summary>Bir stok kaleminin tek tek hareketleri (hangi tarihte, hangi araca/tedarikçiden ne fiyata).</summary>
+public record StockMovementDetailRow(
+    DateTime Date,
+    string Plate,
+    string CustomerName,
+    int Quantity,
+    decimal UnitPrice,
+    decimal? PurchasePrice,
+    string? SupplierName);
+
+/// <summary>Ürün bazlı alış (maliyet) / satış (ciro) / kâr özeti.</summary>
+public record StockPurchaseSaleRow(
+    Guid? StockProductId,
+    string Name,
+    string? Category,
+    int TotalQuantity,
+    decimal TotalPurchaseAmount,
+    decimal TotalSaleAmount,
+    decimal Profit);
+
+/// <summary>Cari hesap (müşteri/tedarikçi) hareket özeti — seçilen dönemdeki borç/alacak.</summary>
+public record AccountLedgerRow(
+    Guid AccountId,
+    string AccountName,
+    string AccountType, // "musteri" | "tedarikci"
+    decimal TotalDebit,
+    decimal TotalCredit,
+    int MovementCount,
+    decimal CurrentBalance);
+
+/// <summary>Bir müşterinin cari hesabındaki tek tek hareketler (iş emri borcu / tahsilat).</summary>
+public record CustomerLedgerEntryDto(
+    DateTime Date,
+    string Type, // "borc" | "tahsilat"
+    string Description,
+    decimal Amount,
+    string? Plate);
+
+public record TopServiceRow(string Title, int Count, decimal TotalAmount);
+
+/// <summary>Genel satış/ciro raporu — dönem toplamları + ödeme yöntemi dağılımı + en çok satılan hizmetler.</summary>
+public record SalesReportDto(
+    int WorkOrderCount,
+    decimal TotalRevenue,
+    decimal TotalPaid,
+    decimal TotalDiscount,
+    decimal Nakit,
+    decimal Kart,
+    decimal Havale,
+    decimal Diger,
+    IReadOnlyList<TopServiceRow> TopServices);
 
 public class SupplierPhoneConflictException()
     : Exception("Bu telefon numarasıyla kayıtlı bir cari zaten var.");
+
+public record ScanRuhsatRequest(string ImageBase64, string? MimeType = "image/jpeg");
+
+public record RuhsatScanResponse(
+    string Plate,
+    string Brand,
+    string Model,
+    string Year,
+    string Color,
+    string Fuel,
+    string Chassis,
+    string EngineNo,
+    string EngineVolume,
+    string? Provider = null,
+    string? ModelUsed = null);

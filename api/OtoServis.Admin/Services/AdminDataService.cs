@@ -396,7 +396,7 @@ public class AdminDataService(DbFactory db, TenantContext tenant)
         var sql = @"SELECT s.id AS Id, s.full_name AS Name, s.contact_person AS Contact, NULLIF(s.phone, N'') AS Phone,
                            s.email AS Email, ISNULL(b.balance, s.opening_balance) AS Balance
                     FROM dbo.customers s
-                    LEFT JOIN dbo.vw_SupplierBalance b ON b.supplier_id = s.id
+                    LEFT JOIN dbo.vw_SupplierBalance b ON b.supplier_id = s.id AND b.shop_id = s.shop_id
                     WHERE s.shop_id = @ShopId AND s.is_active = 1 AND s.is_supplier = 1";
         if (!string.IsNullOrWhiteSpace(search))
             sql += " AND (s.full_name LIKE @q OR s.phone LIKE @q)";
@@ -479,7 +479,7 @@ public class AdminDataService(DbFactory db, TenantContext tenant)
             @"SELECT s.id AS Id, s.full_name AS Name, NULLIF(s.phone, N'') AS Phone,
                      ISNULL(b.balance, s.opening_balance) AS Balance
               FROM dbo.customers s
-              LEFT JOIN dbo.vw_SupplierBalance b ON b.supplier_id = s.id
+              LEFT JOIN dbo.vw_SupplierBalance b ON b.supplier_id = s.id AND b.shop_id = s.shop_id
               WHERE s.id = @id AND s.shop_id = @ShopId AND s.is_active = 1 AND s.is_supplier = 1",
             new { id, ShopId });
         if (supplier is null) return null;

@@ -9,37 +9,61 @@ namespace OtoServis.Admin.Services;
 public class AuthService(DbFactory db)
 {
     public async Task<(Guid UserId, string FullName, ShopOption Shop)?> ValidateAsync(
-        string tenantCode, string phone, string password)
+        string identifier, string password)
     {
         await using var conn = await db.OpenAsync();
 
-        var shop = await ResolveShopAsync(conn, tenantCode);
-        if (shop is null) return null;
+        var login = identifier?.Trim() ?? "";
+        if (login.Length < 3) return null;
 
         var hash = PasswordHasher.Hash(password);
+        var phoneDigits = DigitsOnly(login);
         var user = await conn.QuerySingleOrDefaultAsync<dynamic>(
-            @"SELECT id, full_name AS FullName, password_hash AS PasswordHash
-              FROM dbo.users WHERE phone = @phone AND is_active = 1",
-            new { phone = phone.Trim() });
+            @"SELECT id, full_name AS FullName, password_hash AS PasswordHash, default_shop_id AS DefaultShopId
+              FROM dbo.users
+              WHERE is_active = 1
+                AND (
+                  phone = @login
+                  OR (@phoneDigits <> N'' AND REPLACE(REPLACE(REPLACE(phone, N' ', N''), N'-', N''), N'+', N'') = @phoneDigits)
+                  OR (username IS NOT NULL AND LOWER(username) = LOWER(@login))
+                )",
+            new { login, phoneDigits });
 
         if (user is null || (string)user.PasswordHash != hash) return null;
 
         var userId = (Guid)user.id;
-        var membership = await GetShopMembershipAsync(conn, userId, shop.ShopId);
-        if (membership is null) return null;
+        var shops = (await conn.QueryAsync<ShopOption>(
+            @"SELECT shop_id AS ShopId, tenant_code AS TenantCode, shop_name AS ShopName,
+                     city AS City, role AS Role, CAST(is_default AS bit) AS IsDefault
+              FROM dbo.vw_UserShops
+              WHERE user_id = @userId
+              ORDER BY is_default DESC, shop_name",
+            new { userId })).ToList();
+        if (shops.Count == 0) return null;
+
+        Guid? defaultShopId = user.DefaultShopId as Guid?;
+        var membership = shops.FirstOrDefault(s => s.IsDefault)
+                         ?? (defaultShopId.HasValue
+                             ? shops.FirstOrDefault(s => s.ShopId == defaultShopId.Value)
+                             : null)
+                         ?? shops[0];
+
+        var license = await ShopLicenseHelper.GetForShopAsync(conn, membership.ShopId)
+            ?? ShopLicenseHelper.Evaluate("unlimited", null);
+        if (license.LicenseStatus == "expired")
+            throw new ShopLicenseExpiredException();
 
         await conn.ExecuteAsync(
             "UPDATE dbo.users SET default_shop_id = @shopId, last_login_at = SYSUTCDATETIME() WHERE id = @userId",
-            new { shopId = shop.ShopId, userId });
+            new { shopId = membership.ShopId, userId });
 
         return (userId, (string)user.FullName, membership);
     }
 
-    public async Task<ShopPreview?> LookupTenantAsync(string tenantCode)
+    public async Task<AdminShopLicense?> GetShopLicenseAsync(Guid shopId)
     {
         await using var conn = await db.OpenAsync();
-        var shop = await ResolveShopAsync(conn, tenantCode);
-        return shop is null ? null : new ShopPreview(shop.TenantCode, shop.ShopName, shop.City);
+        return await ShopLicenseHelper.GetForShopAsync(conn, shopId);
     }
 
     public async Task<ShopOption?> GetShopMembershipAsync(Guid userId, Guid shopId)
@@ -59,15 +83,13 @@ public class AuthService(DbFactory db)
             new { userId, shopId });
     }
 
-    private static async Task<ResolvedShop?> ResolveShopAsync(
-        Microsoft.Data.SqlClient.SqlConnection conn, string tenantCode)
+    private static string DigitsOnly(string value)
     {
-        if (string.IsNullOrWhiteSpace(tenantCode)) return null;
-        return await conn.QuerySingleOrDefaultAsync<ResolvedShop>(
-            @"SELECT id AS ShopId, tenant_code AS TenantCode, name AS ShopName, city AS City
-              FROM dbo.shops
-              WHERE UPPER(tenant_code) = UPPER(@code) AND is_active = 1",
-            new { code = tenantCode.Trim() });
+        if (string.IsNullOrEmpty(value)) return "";
+        var chars = value.Where(char.IsDigit).ToArray();
+        if (chars.Length < 7 || chars.Length < value.Count(c => !char.IsWhiteSpace(c)) * 0.7)
+            return "";
+        return new string(chars);
     }
 
     public static ClaimsPrincipal BuildPrincipal(Guid userId, string fullName, ShopOption shop)
@@ -90,14 +112,4 @@ public class AuthService(DbFactory db)
         IsPersistent = true,
         ExpiresUtc = DateTimeOffset.UtcNow.AddHours(12),
     };
-
-    private sealed class ResolvedShop
-    {
-        public Guid ShopId { get; init; }
-        public string TenantCode { get; init; } = "";
-        public string ShopName { get; init; } = "";
-        public string? City { get; init; }
-    }
 }
-
-public record ShopPreview(string TenantCode, string ShopName, string? City);

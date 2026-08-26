@@ -30,7 +30,7 @@ yarn-error.*
 .DS_Store
 *.pem
 
-# local env files (may contain secrets, e.g. EXPO_PUBLIC_GEMINI_API_KEY)
+# local env files (may contain secrets)
 .env
 .env.*
 !.env.example
