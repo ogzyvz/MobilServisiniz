@@ -1,6 +1,33 @@
 workflows:
+  react-native-ios-unsigned:
+    name: React Native iOS Unsigned Test Build
+    max_build_duration: 60
+    instance_type: mac_mini_m1
+    working_directory: mobile
+    environment:
+      node: latest
+      xcode: latest
+      cocoapods: default
+    scripts:
+      - name: Install npm dependencies
+        script: |
+          npm install
+      - name: Generate iOS native project (expo prebuild)
+        script: |
+          npx expo prebuild --platform ios --no-install
+      - name: Install CocoaPods dependencies
+        script: |
+          cd ios && pod install
+      - name: Build iOS Application (Unsigned)
+        script: |
+          cd ios
+          xcodebuild -workspace MobilServisiniz.xcworkspace -scheme MobilServisiniz \
+            -configuration Debug -sdk iphonesimulator CODE_SIGNING_ALLOWED=NO
+    artifacts:
+      - mobile/ios/build/Build/Products/**/*.app
+
   react-native-ios:
-    name: React Native iOS Build
+    name: React Native iOS Build (Ad Hoc, imzali)
     max_build_duration: 60
     instance_type: mac_mini_m1
     working_directory: mobile
@@ -9,9 +36,8 @@ workflows:
       xcode: latest
       cocoapods: default
       ios_signing:
-        # Ad-hoc: cihaz UDID'leri Apple Developer hesabinizda kayitli olmali (link ile kurulum).
+        # Ad-hoc: cihaz UDID'leri Apple Developer hesabinizda kayitli olmali.
         # App Store/TestFlight'a yuklemek icin "app_store" yapin.
-        # Kurumsal (Apple Developer Enterprise) hesabiniz varsa "enterprise" yapin.
         distribution_type: ad_hoc
         bundle_identifier: com.otoservis.app
       vars:
