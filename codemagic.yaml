@@ -28,6 +28,42 @@ workflows:
       - mobile/ios/build/Build/Products/**/*.app
       - $HOME/Library/Developer/Xcode/DerivedData/**/Build/Products/**/*.app
 
+  react-native-ios-sideload:
+    name: React Native iOS Unsigned Device IPA (Sideloadly icin)
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+    working_directory: mobile
+    environment:
+      node: latest
+      xcode: latest
+      cocoapods: default
+    scripts:
+      - name: Install npm dependencies
+        script: |
+          npm install
+      - name: Generate iOS native project (expo prebuild)
+        script: |
+          npx expo prebuild --platform ios --no-install
+      - name: Install CocoaPods dependencies
+        script: |
+          cd ios && pod install
+      - name: Build iOS Application (Unsigned, gercek cihaz icin)
+        script: |
+          cd ios
+          xcodebuild -workspace MobilServisiniz.xcworkspace -scheme MobilServisiniz \
+            -configuration Release -sdk iphoneos -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            build
+      - name: Package as unsigned .ipa (Payload/App.app)
+        script: |
+          cd ios/build/Build/Products/Release-iphoneos
+          rm -rf Payload
+          mkdir -p Payload
+          cp -r MobilServisiniz.app Payload/
+          zip -r -y "$CM_BUILD_DIR/mobile/MobilServisiniz-unsigned.ipa" Payload
+    artifacts:
+      - mobile/MobilServisiniz-unsigned.ipa
+
   react-native-ios:
     name: React Native iOS Build (Ad Hoc, imzali)
     max_build_duration: 60
