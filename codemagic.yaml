@@ -62,5 +62,6 @@ workflows:
             --workspace "$CM_BUILD_DIR/mobile/ios/$XCODE_WORKSPACE" \
             --scheme "$XCODE_SCHEME"
     artifacts:
-      - build/ios/ipa/*.ipa
-      - /tmp/xcodebuild_logs/*.log
+      - "**/build/Build/Products/Debug-iphoneos/*.app"
+      - "**/*.ipa"
+      - "**/*.app"
