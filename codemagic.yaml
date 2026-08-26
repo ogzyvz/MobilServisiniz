@@ -1,0 +1,22 @@
+workflows:
+  react-native-ios:
+    name: React Native iOS Build
+    max_build_duration: 60
+    instance_type: mac_mini_m1
+    environment:
+      node: latest
+      xcode: latest
+      cocoapods: default
+    scripts:
+      - name: Install dependencies
+        script: |
+          npm install
+      - name: Install CocoaPods
+        script: |
+          cd ios && pod install
+      - name: Build iOS Application
+        script: |
+          xcodebuild -workspace ios/*.xcworkspace -scheme MobilServisiniz -configuration Release -archivePath build/ios/MobilServisiniz.xcarchive archive
+          xcodebuild -exportArchive -archivePath build/ios/MobilServisiniz.xcarchive -exportPath build/ios/export -exportOptionsPlist ios/ExportOptions.plist
+    artifacts:
+      - build/ios/export/*.ipa
