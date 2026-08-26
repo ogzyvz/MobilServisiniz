@@ -22,9 +22,11 @@ workflows:
         script: |
           cd ios
           xcodebuild -workspace MobilServisiniz.xcworkspace -scheme MobilServisiniz \
-            -configuration Debug -sdk iphonesimulator CODE_SIGNING_ALLOWED=NO
+            -configuration Debug -sdk iphonesimulator -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO
     artifacts:
       - mobile/ios/build/Build/Products/**/*.app
+      - $HOME/Library/Developer/Xcode/DerivedData/**/Build/Products/**/*.app
 
   react-native-ios:
     name: React Native iOS Build (Ad Hoc, imzali)
