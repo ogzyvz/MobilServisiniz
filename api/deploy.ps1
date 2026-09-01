@@ -1,6 +1,7 @@
 # OtoServis — Publish ve sunucuya deploy
 # Sunucu: 37.148.211.243
-# API: 5280 | Admin: 5281 | Platform: 5282
+# Domain (IIS uzerinden): api./panel./yonetim.mobilservisiniz.com
+# Eski portlar (gecis suresince, IIS ayni binding'leri de sunuyor): API 5280 | Admin 5281 | Platform 5282
 
 param(
     [switch]$DeployOnly,
@@ -67,14 +68,30 @@ Write-Host "`n>> Sunucuya deploy: $Server" -ForegroundColor Cyan
 $secPass = ConvertTo-SecureString $ServerPass -AsPlainText -Force
 $cred = New-Object System.Management.Automation.PSCredential($ServerUser, $secPass)
 
+# iis-setup script'lerini (Restart-OtoServis.ps1 dahil) once kopyala — deployScript bunu kullanacak.
+$IisSetupSource = "$PublishRoot\iis-setup"
+if (Test-Path $IisSetupSource) {
+    try {
+        New-Item -ItemType Directory -Force -Path "\\$Server\C$\OtoServis\iis-setup" -ErrorAction SilentlyContinue | Out-Null
+        Copy-Item "$IisSetupSource\*" -Destination "\\$Server\C$\OtoServis\iis-setup\" -Force -ErrorAction SilentlyContinue
+    } catch {
+        Write-Host "UYARI: iis-setup klasoru kopyalanamadi (SMB erisimi yok olabilir): $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+}
+
 $deployScript = @"
 `$apiPath = '$RemoteApiPath'
 `$adminPath = '$RemoteAdminPath'
 `$platformPath = '$RemotePlatformPath'
 New-Item -ItemType Directory -Force -Path `$apiPath, `$adminPath, `$platformPath | Out-Null
 
-Get-Process -Name 'dotnet','OtoServis.Api','OtoServis.Admin','OtoServis.Platform' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-Start-Sleep -Seconds 2
+`$restartScript = 'C:\OtoServis\iis-setup\Restart-OtoServis.ps1'
+if (Test-Path `$restartScript) {
+    & `$restartScript -StopOnly
+} else {
+    Get-Process -Name 'dotnet','OtoServis.Api','OtoServis.Admin','OtoServis.Platform' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 2
+}
 
 if (-not (Get-NetFirewallRule -DisplayName 'OtoServis API 5280' -ErrorAction SilentlyContinue)) {
     New-NetFirewallRule -DisplayName 'OtoServis API 5280' -Direction Inbound -Protocol TCP -LocalPort 5280 -Action Allow | Out-Null
@@ -110,22 +127,26 @@ Expand-Archive -Path 'C:\OtoServis\otoservis-api.zip' -DestinationPath '$RemoteA
 Expand-Archive -Path 'C:\OtoServis\otoservis-admin.zip' -DestinationPath '$RemoteAdminPath' -Force
 Expand-Archive -Path 'C:\OtoServis\otoservis-platform.zip' -DestinationPath '$RemotePlatformPath' -Force
 
-`$env:ASPNETCORE_ENVIRONMENT = 'Production'
-
-Start-Process -FilePath 'dotnet' -ArgumentList '$RemoteApiPath\OtoServis.Api.dll' -WorkingDirectory '$RemoteApiPath' -WindowStyle Hidden
-Start-Sleep -Seconds 2
-Start-Process -FilePath 'dotnet' -ArgumentList '$RemoteAdminPath\OtoServis.Admin.dll' -WorkingDirectory '$RemoteAdminPath' -WindowStyle Hidden
-Start-Sleep -Seconds 2
-Start-Process -FilePath 'dotnet' -ArgumentList '$RemotePlatformPath\OtoServis.Platform.dll' -WorkingDirectory '$RemotePlatformPath' -WindowStyle Hidden
+`$restartScript = 'C:\OtoServis\iis-setup\Restart-OtoServis.ps1'
+if (Test-Path `$restartScript) {
+    & `$restartScript -StartOnly
+} else {
+    `$env:ASPNETCORE_ENVIRONMENT = 'Production'
+    Start-Process -FilePath 'dotnet' -ArgumentList '$RemoteApiPath\OtoServis.Api.dll' -WorkingDirectory '$RemoteApiPath' -WindowStyle Hidden
+    Start-Sleep -Seconds 2
+    Start-Process -FilePath 'dotnet' -ArgumentList '$RemoteAdminPath\OtoServis.Admin.dll' -WorkingDirectory '$RemoteAdminPath' -WindowStyle Hidden
+    Start-Sleep -Seconds 2
+    Start-Process -FilePath 'dotnet' -ArgumentList '$RemotePlatformPath\OtoServis.Platform.dll' -WorkingDirectory '$RemotePlatformPath' -WindowStyle Hidden
+}
 
 Write-Host 'API, Admin ve Platform baslatildi.'
 "@
 
     Invoke-Command -ComputerName $Server -Credential $cred -ScriptBlock ([scriptblock]::Create($startScript))
     Write-Host "`nDeploy basarili!" -ForegroundColor Green
-    Write-Host "  API:      http://${Server}:5280/swagger"
-    Write-Host "  Admin:    http://${Server}:5281"
-    Write-Host "  Platform: http://${Server}:5282"
+    Write-Host "  API:      https://api.mobilservisiniz.com/swagger  (eski: http://${Server}:5280/swagger)"
+    Write-Host "  Admin:    https://panel.mobilservisiniz.com  (eski: http://${Server}:5281)"
+    Write-Host "  Platform: https://yonetim.mobilservisiniz.com  (eski: http://${Server}:5282)"
 }
 catch {
     Write-Host "`nOtomatik deploy basarisiz: $($_.Exception.Message)" -ForegroundColor Yellow
@@ -145,8 +166,8 @@ Manuel deploy adimlari:
    start-api.bat / start-admin.bat / start-platform.bat
 
 5. Test:
-   http://${Server}:5280/swagger
-   http://${Server}:5281
-   http://${Server}:5282
+   https://api.mobilservisiniz.com/swagger  (veya eski: http://${Server}:5280/swagger)
+   https://panel.mobilservisiniz.com        (veya eski: http://${Server}:5281)
+   https://yonetim.mobilservisiniz.com      (veya eski: http://${Server}:5282)
 "@ -ForegroundColor Gray
 }

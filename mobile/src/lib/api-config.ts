@@ -1,7 +1,7 @@
-/** MobilServisiniz Web API adresi — sunucuda API 5280 portunda yayınlanmalıdır. */
+/** MobilServisiniz Web API adresi — IIS üzerinden domain ile yayınlanıyor. */
 import { Platform } from 'react-native'
 
-const PRODUCTION_API = 'http://37.148.211.243:5280'
+const PRODUCTION_API = 'https://api.mobilservisiniz.com'
 
 /** Android emülatörde localhost için 10.0.2.2 kullanılır. */
 const DEV_ANDROID_API = 'http://10.0.2.2:5280'

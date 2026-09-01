@@ -2,7 +2,7 @@
   "expo": {
     "name": "MobilServisiniz",
     "slug": "mobilservisiniz",
-    "version": "1.0.27",
+    "version": "1.0.29",
     "orientation": "default",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -19,8 +19,8 @@
       }
     },
     "android": {
-      "package": "com.otoservis.app",
-      "versionCode": 28,
+      "package": "com.efogy.mobilservisiniz",
+      "versionCode": 30,
       "softwareKeyboardLayoutMode": "resize",
       "permissions": [
         "REQUEST_INSTALL_PACKAGES"
@@ -42,7 +42,8 @@
         "expo-image-picker",
         {
           "cameraPermission": "Ruhsatı çekip araç bilgilerini otomatik doldurmak için kamera erişimi gereklidir.",
-          "photosPermission": "Ruhsat fotoğrafını seçmek için galeri erişimi gereklidir."
+          "photosPermission": "Ruhsat fotoğrafını seçmek için galeri erişimi gereklidir.",
+          "microphonePermission": false
         }
       ],
       [

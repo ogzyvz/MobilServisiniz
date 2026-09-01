@@ -44,7 +44,7 @@ public class AppReleaseController(PlatformDataService data, IConfiguration confi
                 var storagePath = config["AppRelease:StoragePath"]
                     ?? @"C:\OtoServis\api\wwwroot\releases";
                 var publicBase = (config["AppRelease:PublicBaseUrl"]
-                    ?? "http://37.148.211.243:5280/releases").TrimEnd('/');
+                    ?? "https://api.mobilservisiniz.com/releases").TrimEnd('/');
 
                 Directory.CreateDirectory(storagePath);
                 var destName = "MobilServisiniz.apk";

@@ -34,6 +34,13 @@ publish/AI-ANAHTARLAR.txt
 # Real customer/shop provisioning scripts (contain live phone/password hash)
 publish/add_shop_oto_balkan.sql
 
+# Cloudflare Origin CA sertifikasi ve ozel anahtari (asla commit edilmez)
+publish/iis-setup/cf-origin.pem
+publish/iis-setup/cf-origin.key
+publish/iis-setup/cf-origin.pfx
+publish/iis-setup/*.pfx
+publish/iis-setup/pfx-password.txt
+
 # Published deploy output (regenerated via api/deploy.ps1 or dotnet publish, mirrors source+bin)
 publish/admin/
 publish/api/

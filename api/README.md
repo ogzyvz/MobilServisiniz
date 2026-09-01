@@ -100,11 +100,12 @@ Anahtar alma:
 
 ## Mobil uygulama entegrasyonu
 
-Mobil uygulama şu an yerel SQLite kullanıyor (`mobile/src/lib/db.ts`). API'ye geçmek için:
+Mobil uygulama, `mobile/src/lib/api-config.ts` üzerinden `API_BASE_URL` ile API'ye bağlanır:
 
-1. `mobile/src/lib/api.ts` ile HTTP client ekleyin
-2. `API_BASE_URL` olarak bilgisayar IP'si + port (ör. `http://192.168.1.10:5280`)
-3. Login → select-shop → token'ı AsyncStorage'da saklayın
+1. `mobile/src/lib/api.ts` HTTP client'ını kullanır
+2. Geliştirmede: bilgisayar IP'si + port (ör. `http://192.168.1.10:5280`) veya Android emülatörde `http://10.0.2.2:5280`
+3. Üretimde: `https://api.mobilservisiniz.com`
+4. Login → select-shop → token'ı AsyncStorage'da saklayın
 
 ## Üretim / Publish
 
@@ -114,14 +115,15 @@ cd api
 ```
 
 Çıktı:
-- `publish/api/` — API (port 5280)
-- `publish/admin/` — Admin panel (port 5281)
-- `publish/OtoServis-Api.zip` + `OtoServis-Admin.zip`
+- `publish/api/` — API
+- `publish/admin/` — Admin panel
+- `publish/platform/` — Platform yönetim paneli
+- `publish/OtoServis-Api.zip` + `OtoServis-Admin.zip` + `OtoServis-Platform.zip`
 
-Sunucuya kurulum: **`api/DEPLOY.md`** ve **`publish/install-server.ps1`**
+Sunucuya kurulum ve IIS + domain kurulumu: **`api/DEPLOY.md`** ve **`publish/iis-setup/README.md`**
 
-**Sunucu:** `37.148.211.243`  
-**Mobil API adresi:** `http://37.148.211.243:5280`
+**Sunucu:** `37.148.211.243`
+**Mobil API adresi:** `https://api.mobilservisiniz.com` (eski: `http://37.148.211.243:5280`, geçiş süresince hâlâ çalışır)
 
 ## Üretim notları
 

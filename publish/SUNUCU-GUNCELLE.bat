@@ -84,14 +84,18 @@ call :run_sql "%SQL19%" 23_customer_balance_fix
 rem Encoding duzeltmesi EN SONDA: ara scriptler SP'yi yeniden yazsa bile Turkce bozulmasin
 call :run_sql "%SQL10%" 14_fix_supplier_description_encoding
 
-echo [3/7] Eski surecler durduruluyor...
-for /f "tokens=5" %%a in ('netstat -ano ^| findstr :5280 ^| findstr LISTENING') do taskkill /F /PID %%a 2>nul
-for /f "tokens=5" %%a in ('netstat -ano ^| findstr :5281 ^| findstr LISTENING') do taskkill /F /PID %%a 2>nul
-for /f "tokens=5" %%a in ('netstat -ano ^| findstr :5282 ^| findstr LISTENING') do taskkill /F /PID %%a 2>nul
-taskkill /F /IM OtoServis.Api.exe 2>nul
-taskkill /F /IM OtoServis.Admin.exe 2>nul
-taskkill /F /IM OtoServis.Platform.exe 2>nul
-timeout /t 2 /nobreak >nul
+echo [3/7] Servisler durduruluyor (IIS varsa App Pool, yoksa eski surec)...
+if exist "%BASE_DIR%\iis-setup\Restart-OtoServis.ps1" (
+    powershell -ExecutionPolicy Bypass -File "%BASE_DIR%\iis-setup\Restart-OtoServis.ps1" -StopOnly
+) else (
+    for /f "tokens=5" %%a in ('netstat -ano ^| findstr :5280 ^| findstr LISTENING') do taskkill /F /PID %%a 2>nul
+    for /f "tokens=5" %%a in ('netstat -ano ^| findstr :5281 ^| findstr LISTENING') do taskkill /F /PID %%a 2>nul
+    for /f "tokens=5" %%a in ('netstat -ano ^| findstr :5282 ^| findstr LISTENING') do taskkill /F /PID %%a 2>nul
+    taskkill /F /IM OtoServis.Api.exe 2>nul
+    taskkill /F /IM OtoServis.Admin.exe 2>nul
+    taskkill /F /IM OtoServis.Platform.exe 2>nul
+    timeout /t 2 /nobreak >nul
+)
 
 echo [4/7] Yeni API dosyalari aciliyor...
 if not exist "%API_DIR%" mkdir "%API_DIR%"
@@ -112,31 +116,35 @@ if exist "%PLATFORM_ZIP%" (
     echo UYARI: %PLATFORM_ZIP% yok — Platform atlandi.
 )
 
-echo [7/7] Servisler baslatiliyor...
-cd /d "%API_DIR%"
-set ASPNETCORE_ENVIRONMENT=Production
-set ASPNETCORE_URLS=http://0.0.0.0:5280
-start "OtoServis-API" /MIN dotnet OtoServis.Api.dll
+echo [7/7] Servisler baslatiliyor (IIS varsa App Pool, yoksa eski surec)...
+if exist "%BASE_DIR%\iis-setup\Restart-OtoServis.ps1" (
+    powershell -ExecutionPolicy Bypass -File "%BASE_DIR%\iis-setup\Restart-OtoServis.ps1" -StartOnly
+) else (
+    cd /d "%API_DIR%"
+    set ASPNETCORE_ENVIRONMENT=Production
+    set ASPNETCORE_URLS=http://0.0.0.0:5280
+    start "OtoServis-API" /MIN dotnet OtoServis.Api.dll
 
-timeout /t 3 /nobreak >nul
+    timeout /t 3 /nobreak >nul
 
-cd /d "%ADMIN_DIR%"
-set ASPNETCORE_URLS=http://0.0.0.0:5281
-start "OtoServis-Admin" /MIN dotnet OtoServis.Admin.dll
+    cd /d "%ADMIN_DIR%"
+    set ASPNETCORE_URLS=http://0.0.0.0:5281
+    start "OtoServis-Admin" /MIN dotnet OtoServis.Admin.dll
 
-if exist "%PLATFORM_DIR%\OtoServis.Platform.dll" (
-    timeout /t 2 /nobreak >nul
-    cd /d "%PLATFORM_DIR%"
-    set ASPNETCORE_URLS=http://0.0.0.0:5282
-    start "OtoServis-Platform" /MIN dotnet OtoServis.Platform.dll
+    if exist "%PLATFORM_DIR%\OtoServis.Platform.dll" (
+        timeout /t 2 /nobreak >nul
+        cd /d "%PLATFORM_DIR%"
+        set ASPNETCORE_URLS=http://0.0.0.0:5282
+        start "OtoServis-Platform" /MIN dotnet OtoServis.Platform.dll
+    )
 )
 
 echo.
 echo ============================================
 echo  Guncelleme tamam!
-echo  API:      http://37.148.211.243:5280/swagger
-echo  Admin:    http://37.148.211.243:5281
-echo  Platform: http://37.148.211.243:5282
+echo  API:      https://api.mobilservisiniz.com/swagger   (eski: http://37.148.211.243:5280/swagger)
+echo  Admin:    https://panel.mobilservisiniz.com          (eski: http://37.148.211.243:5281)
+echo  Platform: https://yonetim.mobilservisiniz.com        (eski: http://37.148.211.243:5282)
 echo ============================================
 pause
 exit /b 0
