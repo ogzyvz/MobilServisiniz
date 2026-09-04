@@ -8,10 +8,6 @@ import { AppShell, HeaderLogoutButton, type MainTabKey } from '@/components/app-
 
 import { AppSheet, SheetActionList, SheetCancelButton } from '@/components/app-modal'
 
-import { ForceUpdateScreen, SoftUpdateSheet } from '@/screens/force-update'
-
-import { evaluateUpdateGate, type AppUpdateInfo } from '@/lib/app-update'
-
 import { colors } from '@/lib/theme'
 
 import type {
@@ -228,16 +224,6 @@ export function ServiceApp() {
 
   const [ready, setReady] = useState(false)
 
-  const [forceUpdate, setForceUpdate] = useState<{
-    info: AppUpdateInfo
-    currentCode: number
-  } | null>(null)
-
-  const [softUpdate, setSoftUpdate] = useState<{
-    info: AppUpdateInfo
-    currentCode: number
-  } | null>(null)
-
   const [user, setUser] = useState<string | null>(null)
 
   const [vehicles, setVehicles] = useState<Vehicle[]>([])
@@ -355,16 +341,8 @@ export function ServiceApp() {
 
       try {
 
-        const gate = await evaluateUpdateGate()
-        if (!active) return
-        if (gate.kind === 'force') {
-          setForceUpdate({ info: gate.info, currentCode: gate.currentCode })
-          setReady(true)
-          return
-        }
-        if (gate.kind === 'soft') {
-          setSoftUpdate({ info: gate.info, currentCode: gate.currentCode })
-        }
+        // Uygulama guncellemeleri artik Google Play uzerinden yonetiliyor;
+        // uygulama ici APK indirme/kurma akisi kaldirildi (REQUEST_INSTALL_PACKAGES izni kullanilmiyor).
 
         const saved = await initSession()
 
@@ -1078,28 +1056,11 @@ export function ServiceApp() {
 
   }
 
-  if (forceUpdate) {
-    return (
-      <ForceUpdateScreen
-        info={forceUpdate.info}
-        currentCode={forceUpdate.currentCode}
-      />
-    )
-  }
-
   if (!user) {
 
     return (
       <View className="flex-1">
         <Login onLogin={handleLogin} />
-        {softUpdate ? (
-          <SoftUpdateSheet
-            visible
-            info={softUpdate.info}
-            currentCode={softUpdate.currentCode}
-            onClose={() => setSoftUpdate(null)}
-          />
-        ) : null}
       </View>
     )
 
@@ -1339,15 +1300,6 @@ export function ServiceApp() {
         />
         <SheetCancelButton onPress={() => setLogoutOpen(false)} label="Vazgeç" />
       </AppSheet>
-
-      {softUpdate ? (
-        <SoftUpdateSheet
-          visible
-          info={softUpdate.info}
-          currentCode={softUpdate.currentCode}
-          onClose={() => setSoftUpdate(null)}
-        />
-      ) : null}
     </View>
   )
 }
