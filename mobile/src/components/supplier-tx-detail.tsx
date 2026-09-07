@@ -1,5 +1,6 @@
+import { useState } from 'react'
 import { Pressable, Text, View } from 'react-native'
-import { ChevronRight } from 'lucide-react-native'
+import { CarFront, ChevronDown, ChevronRight, ChevronUp } from 'lucide-react-native'
 import { AppSheet, SheetCancelButton } from '@/components/app-modal'
 import { formatCurrency, formatDate, formatDateTime, formatTime, toTurkeyDateKey } from '@/lib/format'
 import type { SupplierTransaction } from '@/lib/api'
@@ -33,12 +34,45 @@ export function supplierTxSubtitle(t: SupplierTransaction): string | undefined {
   return t.description?.trim() || undefined
 }
 
+export type SupplierTxRow =
+  | { kind: 'single'; tx: SupplierTransaction }
+  | { kind: 'plate'; plate: string; items: SupplierTransaction[]; net: number }
+
 export type SupplierTxDateGroup = {
   dateKey: string
   label: string
   items: SupplierTransaction[]
+  rows: SupplierTxRow[]
   /** Alış − (ödeme+iade+iskonto) — günün net borç etkisi */
   netDebt: number
+}
+
+/** Aynı gün içindeki hareketleri araç plakasına göre alt gruplar; plakasız hareketler tekil satır olarak kalır. */
+function buildSupplierTxRows(items: SupplierTransaction[]): SupplierTxRow[] {
+  const rows: SupplierTxRow[] = []
+  const plateIndex = new Map<string, number>()
+  for (const t of items) {
+    const plate = t.plate?.trim()
+    if (plate) {
+      const idx = plateIndex.get(plate)
+      const signed = isSupplierCredit(t.type) ? -t.amount : t.amount
+      if (idx != null) {
+        const row = rows[idx]
+        if (row.kind === 'plate') {
+          row.items.push(t)
+          row.net += signed
+        }
+      } else {
+        plateIndex.set(plate, rows.length)
+        rows.push({ kind: 'plate', plate, items: [t], net: signed })
+      }
+    } else {
+      rows.push({ kind: 'single', tx: t })
+    }
+  }
+  return rows.map((r) =>
+    r.kind === 'plate' ? { ...r, net: Math.round(r.net * 100) / 100 } : r,
+  )
 }
 
 /** Hareketleri Türkiye takvim gününe göre gruplar (yeni → eski). */
@@ -64,6 +98,7 @@ export function groupSupplierTxByDate(transactions: SupplierTransaction[]): Supp
         dateKey,
         label: formatDate(sorted[0]?.createdAt ?? dateKey),
         items: sorted,
+        rows: buildSupplierTxRows(sorted),
         netDebt: Math.round(net * 100) / 100,
       }
     })
@@ -96,57 +131,181 @@ export function SupplierTxGroupedList({
             </Text>
           </View>
           <View className="flex flex-col gap-2">
-            {g.items.map((t) => {
-              const credit = isSupplierCredit(t.type)
-              const sub = supplierTxSubtitle(t)
-              return (
-                <Pressable
-                  key={t.id}
-                  onPress={() => onPress(t)}
-                  className={
-                    compact
-                      ? 'flex-row items-center justify-between rounded-2xl border border-border bg-background px-3 py-3 active:opacity-90'
-                      : 'flex-row items-center justify-between rounded-2xl border border-border bg-card p-3.5 active:opacity-90'
-                  }
-                  style={compact ? undefined : cardShadow}
-                >
-                  <View className="min-w-0 flex-1">
-                    <Text className="text-sm font-bold text-foreground">
-                      {SUPPLIER_TX_LABELS[t.type] ?? t.type}
-                      {t.method
-                        ? ` · ${SUPPLIER_METHOD_LABELS[t.method] ?? t.method}`
-                        : ''}
-                    </Text>
-                    {sub ? (
-                      <Text className="mt-0.5 text-xs text-muted-foreground" numberOfLines={2}>
-                        {sub}
-                      </Text>
-                    ) : null}
-                    <Text className="mt-0.5 text-xs text-muted-foreground">
-                      {formatTime(t.createdAt)}
-                    </Text>
-                  </View>
-                  <View className="ml-2 flex-row items-center gap-1">
-                    <Text
-                      className={
-                        credit
-                          ? 'text-base font-extrabold text-chart-4'
-                          : 'text-base font-extrabold text-destructive'
-                      }
-                    >
-                      {credit ? '-' : '+'}
-                      {formatCurrency(t.amount)}
-                    </Text>
-                    {!compact ? (
-                      <ChevronRight size={16} color={colors.mutedForeground} />
-                    ) : null}
-                  </View>
-                </Pressable>
-              )
-            })}
+            {g.rows.map((row) =>
+              row.kind === 'plate' ? (
+                <PlateGroupRow
+                  key={`plate-${row.plate}-${row.items[0]?.id}`}
+                  plate={row.plate}
+                  items={row.items}
+                  net={row.net}
+                  onPress={onPress}
+                  compact={compact}
+                />
+              ) : (
+                <SingleTxRow
+                  key={row.tx.id}
+                  tx={row.tx}
+                  onPress={onPress}
+                  compact={compact}
+                />
+              ),
+            )}
           </View>
         </View>
       ))}
+    </View>
+  )
+}
+
+function SingleTxRow({
+  tx,
+  onPress,
+  compact,
+}: {
+  tx: SupplierTransaction
+  onPress: (tx: SupplierTransaction) => void
+  compact?: boolean
+}) {
+  const credit = isSupplierCredit(tx.type)
+  const sub = supplierTxSubtitle(tx)
+  return (
+    <Pressable
+      onPress={() => onPress(tx)}
+      className={
+        compact
+          ? 'flex-row items-center justify-between rounded-2xl border border-border bg-background px-3 py-3 active:opacity-90'
+          : 'flex-row items-center justify-between rounded-2xl border border-border bg-card p-3.5 active:opacity-90'
+      }
+      style={compact ? undefined : cardShadow}
+    >
+      <View className="min-w-0 flex-1">
+        <Text className="text-sm font-bold text-foreground">
+          {SUPPLIER_TX_LABELS[tx.type] ?? tx.type}
+          {tx.method ? ` · ${SUPPLIER_METHOD_LABELS[tx.method] ?? tx.method}` : ''}
+        </Text>
+        {sub ? (
+          <Text className="mt-0.5 text-xs text-muted-foreground" numberOfLines={2}>
+            {sub}
+          </Text>
+        ) : null}
+        <Text className="mt-0.5 text-xs text-muted-foreground">{formatTime(tx.createdAt)}</Text>
+      </View>
+      <View className="ml-2 flex-row items-center gap-1">
+        <Text
+          className={
+            credit
+              ? 'text-base font-extrabold text-chart-4'
+              : 'text-base font-extrabold text-destructive'
+          }
+        >
+          {credit ? '-' : '+'}
+          {formatCurrency(tx.amount)}
+        </Text>
+        {!compact ? <ChevronRight size={16} color={colors.mutedForeground} /> : null}
+      </View>
+    </Pressable>
+  )
+}
+
+/** Aynı tarih + plaka için birden çok kalem varsa özet satır; dokununca kalem kalem detay açılır. */
+function PlateGroupRow({
+  plate,
+  items,
+  net,
+  onPress,
+  compact,
+}: {
+  plate: string
+  items: SupplierTransaction[]
+  net: number
+  onPress: (tx: SupplierTransaction) => void
+  compact?: boolean
+}) {
+  const [expanded, setExpanded] = useState(false)
+  const credit = net < 0
+
+  if (items.length === 1) {
+    return <SingleTxRow tx={items[0]} onPress={onPress} compact={compact} />
+  }
+
+  return (
+    <View className="flex flex-col gap-1.5">
+      <Pressable
+        onPress={() => setExpanded((v) => !v)}
+        className={
+          compact
+            ? 'flex-row items-center justify-between rounded-2xl border border-border bg-background px-3 py-3 active:opacity-90'
+            : 'flex-row items-center justify-between rounded-2xl border border-border bg-card p-3.5 active:opacity-90'
+        }
+        style={compact ? undefined : cardShadow}
+      >
+        <View className="min-w-0 flex-1 flex-row items-center gap-2.5">
+          <View className="h-9 w-9 items-center justify-center rounded-xl bg-primary/10">
+            <CarFront size={16} color={colors.primary} />
+          </View>
+          <View className="min-w-0 flex-1">
+            <Text className="text-sm font-bold text-foreground" numberOfLines={1}>
+              {plate}
+            </Text>
+            <Text className="mt-0.5 text-xs text-muted-foreground">
+              {items.length} kalem · kalemler için dokun
+            </Text>
+          </View>
+        </View>
+        <View className="ml-2 flex-row items-center gap-1">
+          <Text
+            className={
+              credit
+                ? 'text-base font-extrabold text-chart-4'
+                : 'text-base font-extrabold text-destructive'
+            }
+          >
+            {credit ? '-' : '+'}
+            {formatCurrency(Math.abs(net))}
+          </Text>
+          {expanded ? (
+            <ChevronUp size={16} color={colors.mutedForeground} />
+          ) : (
+            <ChevronDown size={16} color={colors.mutedForeground} />
+          )}
+        </View>
+      </Pressable>
+      {expanded ? (
+        <View className="ml-3 flex flex-col gap-1.5 border-l-2 border-border pl-3">
+          {items.map((t) => {
+            const itemCredit = isSupplierCredit(t.type)
+            const qty = t.partQuantity && t.partQuantity > 1 ? `${t.partQuantity}× ` : ''
+            const label = t.partName || SUPPLIER_TX_LABELS[t.type] || t.type
+            return (
+              <Pressable
+                key={t.id}
+                onPress={() => onPress(t)}
+                className="flex-row items-center justify-between rounded-xl bg-background px-3 py-2.5 active:opacity-90"
+              >
+                <View className="min-w-0 flex-1">
+                  <Text className="text-xs font-bold text-foreground" numberOfLines={1}>
+                    {qty}
+                    {label}
+                  </Text>
+                  <Text className="mt-0.5 text-[11px] text-muted-foreground">
+                    {formatTime(t.createdAt)}
+                  </Text>
+                </View>
+                <Text
+                  className={
+                    itemCredit
+                      ? 'text-sm font-extrabold text-chart-4'
+                      : 'text-sm font-extrabold text-destructive'
+                  }
+                >
+                  {itemCredit ? '-' : '+'}
+                  {formatCurrency(t.amount)}
+                </Text>
+              </Pressable>
+            )
+          })}
+        </View>
+      ) : null}
     </View>
   )
 }
