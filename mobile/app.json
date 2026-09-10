@@ -20,7 +20,7 @@
     },
     "android": {
       "package": "com.efogy.mobilservisiniz",
-      "versionCode": 31,
+      "versionCode": 32,
       "softwareKeyboardLayoutMode": "resize",
       "adaptiveIcon": {
         "backgroundColor": "#1e3a6e",
