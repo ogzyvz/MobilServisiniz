@@ -35,11 +35,12 @@ set SQL16=%BASE_DIR%\20_customer_supplier_balance.sql
 set SQL17=%BASE_DIR%\21_complaint_category.sql
 set SQL18=%BASE_DIR%\22_activity_log.sql
 set SQL19=%BASE_DIR%\23_customer_balance_fix.sql
+set SQL20=%BASE_DIR%\24_fix_stale_odeme_tamamlandi_status.sql
 
 if not exist "%API_ZIP%" (
     echo HATA: %API_ZIP% bulunamadi!
     echo Once OtoServis-Api.zip, OtoServis-Admin.zip, OtoServis-Platform.zip
-    echo ve SQL 05-23 dosyalarini C:\OtoServis\ altina kopyalayin.
+    echo ve SQL 05-24 dosyalarini C:\OtoServis\ altina kopyalayin.
     pause
     exit /b 1
 )
@@ -81,6 +82,7 @@ call :run_sql "%SQL16%" 20_customer_supplier_balance
 call :run_sql "%SQL17%" 21_complaint_category
 call :run_sql "%SQL18%" 22_activity_log
 call :run_sql "%SQL19%" 23_customer_balance_fix
+call :run_sql "%SQL20%" 24_fix_stale_odeme_tamamlandi_status
 rem Encoding duzeltmesi EN SONDA: ara scriptler SP'yi yeniden yazsa bile Turkce bozulmasin
 call :run_sql "%SQL10%" 14_fix_supplier_description_encoding
 

@@ -612,6 +612,7 @@ public class DataService(TenantService tenant, IWebHostEnvironment env, PlanEnti
             new { serviceId, woId, shopId, req.Title, req.Price });
         if (n > 0)
         {
+            await SyncWorkOrderPaymentStatusAsync(conn, woId, shopId);
             var ctx = await GetWorkOrderContextAsync(conn, woId, shopId);
             if (ctx is not null)
                 await ActivityLogService.LogAsync(
@@ -632,14 +633,18 @@ public class DataService(TenantService tenant, IWebHostEnvironment env, PlanEnti
         var n = await conn.ExecuteAsync(
             "DELETE FROM dbo.services WHERE id=@serviceId AND work_order_id=@woId AND shop_id=@shopId",
             new { serviceId, woId, shopId });
-        if (n > 0 && service is not null)
+        if (n > 0)
         {
-            var ctx = await GetWorkOrderContextAsync(conn, woId, shopId);
-            if (ctx is not null)
-                await ActivityLogService.LogAsync(
-                    conn, shopId, userId, "deleted", "service", serviceId,
-                    $"İşçilik silindi: {(string)service.title} ({(decimal)service.price:0.##} ₺) — {ctx.Plate}",
-                    customerId: ctx.CustomerId, vehicleId: ctx.VehicleId);
+            await SyncWorkOrderPaymentStatusAsync(conn, woId, shopId);
+            if (service is not null)
+            {
+                var ctx = await GetWorkOrderContextAsync(conn, woId, shopId);
+                if (ctx is not null)
+                    await ActivityLogService.LogAsync(
+                        conn, shopId, userId, "deleted", "service", serviceId,
+                        $"İşçilik silindi: {(string)service.title} ({(decimal)service.price:0.##} ₺) — {ctx.Plate}",
+                        customerId: ctx.CustomerId, vehicleId: ctx.VehicleId);
+            }
         }
         return n > 0;
     }
@@ -681,6 +686,8 @@ public class DataService(TenantService tenant, IWebHostEnvironment env, PlanEnti
                 @created_by=@userId",
             new { shopId, woId, partId, req.Name, req.Quantity, req.UnitPrice, userId });
 
+        await SyncWorkOrderPaymentStatusAsync(conn, woId, shopId);
+
         var ctx = await GetWorkOrderContextAsync(conn, woId, shopId);
         if (ctx is not null)
             await ActivityLogService.LogAsync(
@@ -704,6 +711,8 @@ public class DataService(TenantService tenant, IWebHostEnvironment env, PlanEnti
                 @work_order_part_id=@partId,
                 @created_by=@userId",
             new { shopId, woId, partId, userId });
+
+        await SyncWorkOrderPaymentStatusAsync(conn, woId, shopId);
 
         if (part is not null && ctx is not null)
             await ActivityLogService.LogAsync(
@@ -1639,6 +1648,7 @@ public class DataService(TenantService tenant, IWebHostEnvironment env, PlanEnti
             new { id, shopId, woId, req.ServiceCatalogId, req.Title, req.Price, userId });
         if (n > 0)
         {
+            await SyncWorkOrderPaymentStatusAsync(conn, woId, shopId);
             var ctx = await GetWorkOrderContextAsync(conn, woId, shopId);
             if (ctx is not null)
                 await ActivityLogService.LogAsync(
@@ -1683,6 +1693,8 @@ public class DataService(TenantService tenant, IWebHostEnvironment env, PlanEnti
                 req.Source, req.SupplierId, req.PurchasePrice,
             });
 
+        await SyncWorkOrderPaymentStatusAsync(conn, woId, shopId);
+
         var ctx = await GetWorkOrderContextAsync(conn, woId, shopId);
         if (ctx is not null)
         {
@@ -1706,6 +1718,8 @@ public class DataService(TenantService tenant, IWebHostEnvironment env, PlanEnti
         await conn.ExecuteAsync(
             "EXEC dbo.usp_ReturnPartToSupplier @shop_id=@shopId, @work_order_part_id=@partId, @created_by=@userId",
             new { shopId, partId, userId });
+
+        await SyncWorkOrderPaymentStatusAsync(conn, woId, shopId);
 
         if (part is not null && ctx is not null)
             await ActivityLogService.LogAsync(
