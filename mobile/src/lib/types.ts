@@ -155,7 +155,7 @@ export interface Vehicle {
 export const STATUS_LABELS: Record<JobStatus, string> = {
   bekliyor: 'Bekliyor',
   islemde: 'İşlemde',
-  tamamlandi: 'Tamamlandı',
+  tamamlandi: 'Servis Tamamlandı',
   odeme_tamamlandi: 'Ödeme Tamamlandı',
   teslim_edildi: 'Teslim Edildi',
 }

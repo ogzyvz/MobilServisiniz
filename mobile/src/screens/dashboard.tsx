@@ -43,13 +43,13 @@ type IconType = typeof Clock
 const STATUS_LABELS: Record<'bekliyor' | 'islemde' | 'tamamlandi', string> = {
   bekliyor: 'Bekleyen Araçlar',
   islemde: 'İşlemdeki Araçlar',
-  tamamlandi: 'Tamamlanan Araçlar',
+  tamamlandi: 'Servisi Tamamlanan Araçlar',
 }
 
 const STATUS_EMPTY_LABELS: Record<'bekliyor' | 'islemde' | 'tamamlandi', string> = {
   bekliyor: 'Bekleyen araç yok.',
   islemde: 'İşlemde araç yok.',
-  tamamlandi: 'Tamamlanan araç yok.',
+  tamamlandi: 'Servisi tamamlanan araç yok.',
 }
 
 function matchesDashboardFilter(status: JobStatus, filter: JobStatus) {

@@ -105,7 +105,7 @@ const ASSIGNABLE_ROLES = ['admin', 'usta']
 const STATUS_STEPS: { key: JobStatus; short: string }[] = [
   { key: 'bekliyor', short: 'Bekliyor' },
   { key: 'islemde', short: 'İşlemde' },
-  { key: 'tamamlandi', short: 'Tamam' },
+  { key: 'tamamlandi', short: 'Servis' },
   { key: 'odeme_tamamlandi', short: 'Ödeme' },
   { key: 'teslim_edildi', short: 'Teslim' },
 ]

@@ -15,7 +15,7 @@ public class DataService(TenantService tenant, IWebHostEnvironment env, PlanEnti
     {
         ["bekliyor"] = "Bekliyor",
         ["islemde"] = "İşlemde",
-        ["tamamlandi"] = "Tamamlandı",
+        ["tamamlandi"] = "Servis Tamamlandı",
         ["teslim_edildi"] = "Teslim Edildi",
         ["odeme_tamamlandi"] = "Ödeme Tamamlandı",
     };

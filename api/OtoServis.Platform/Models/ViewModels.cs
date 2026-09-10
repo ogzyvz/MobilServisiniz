@@ -252,7 +252,7 @@ public static class RoleLabels
     {
         "bekliyor" => "Bekliyor",
         "islemde" => "İşlemde",
-        "tamamlandi" => "Tamamlandı",
+        "tamamlandi" => "Servis Tamamlandı",
         "odeme_tamamlandi" => "Ödeme Tamamlandı",
         "teslim_edildi" => "Teslim Edildi",
         _ => code ?? "-",
