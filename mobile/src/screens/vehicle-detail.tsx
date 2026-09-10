@@ -297,6 +297,7 @@ export function VehicleDetail({
   onBack: _onBack,
   onAddComplaint,
   onUpdateComplaint,
+  onDeleteComplaint,
   onAddService,
   onUpdateService,
   onDeleteService,
@@ -319,6 +320,7 @@ export function VehicleDetail({
   onBack: () => void
   onAddComplaint: (text: string, category: ComplaintCategory) => Promise<string | undefined>
   onUpdateComplaint: (complaintId: string, text: string, category: ComplaintCategory) => void
+  onDeleteComplaint: (complaintId: string) => void
   onAddService: (s: Omit<ServiceItem, 'id'>, force?: boolean) => Promise<string | undefined>
   onUpdateService: (id: string, s: Omit<ServiceItem, 'id'>) => void
   onDeleteService: (id: string) => void
@@ -756,7 +758,12 @@ export function VehicleDetail({
         <View className="px-5 py-5">
           {tab === 'bilgiler' && <InfoTab vehicle={vehicle} />}
           {tab === 'sikayet' && (
-            <ComplaintTab vehicle={vehicle} onAdd={onAddComplaint} onUpdate={onUpdateComplaint} />
+            <ComplaintTab
+              vehicle={vehicle}
+              onAdd={onAddComplaint}
+              onUpdate={onUpdateComplaint}
+              onDelete={onDeleteComplaint}
+            />
           )}
           {tab === 'islem' && (
             <ServiceTab
@@ -2113,10 +2120,12 @@ function ComplaintTab({
   vehicle,
   onAdd,
   onUpdate,
+  onDelete,
 }: {
   vehicle: Vehicle
   onAdd: (text: string, category: ComplaintCategory) => Promise<string | undefined>
   onUpdate: (complaintId: string, text: string, category: ComplaintCategory) => void
+  onDelete: (complaintId: string) => void
 }) {
   const [open, setOpen] = useState(false)
   const [text, setText] = useState('')
@@ -2126,6 +2135,7 @@ function ComplaintTab({
   const [editText, setEditText] = useState('')
   const [editCategory, setEditCategory] = useState<ComplaintCategory>('diger')
   const [photosVersion, setPhotosVersion] = useState(0)
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
 
   async function save() {
     if (!text.trim()) {
@@ -2204,6 +2214,34 @@ function ComplaintTab({
                   <CancelButton onPress={() => setEditingId(null)} />
                 </View>
               </View>
+            ) : confirmDeleteId === c.id ? (
+              <View
+                key={c.id}
+                className="flex-row items-center gap-3 rounded-2xl border-2 border-destructive/40 bg-destructive/5 p-3"
+              >
+                <View className="flex-1 pl-1">
+                  <Text className="text-sm font-bold text-foreground">Silinsin mi?</Text>
+                  <Text className="mt-0.5 text-xs text-muted-foreground" numberOfLines={2}>
+                    {c.text}
+                  </Text>
+                </View>
+                <Pressable
+                  onPress={() => {
+                    onDelete(c.id)
+                    setConfirmDeleteId(null)
+                  }}
+                  className="h-11 flex-row items-center justify-center gap-1.5 rounded-xl bg-destructive px-4"
+                >
+                  <Trash2 size={16} color={colors.destructiveForeground} />
+                  <Text className="text-sm font-bold text-destructive-foreground">Sil</Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => setConfirmDeleteId(null)}
+                  className="h-11 w-11 items-center justify-center rounded-xl bg-secondary"
+                >
+                  <X size={20} color={colors.secondaryForeground} />
+                </Pressable>
+              </View>
             ) : (
               <View
                 key={c.id}
@@ -2225,12 +2263,20 @@ function ComplaintTab({
                       {formatDateTime(c.createdAt)}
                     </Text>
                   </View>
-                  <Pressable
-                    onPress={() => startEdit(c)}
-                    className="h-9 w-9 items-center justify-center rounded-lg bg-secondary"
-                  >
-                    <Pencil size={14} color={colors.secondaryForeground} />
-                  </Pressable>
+                  <View className="flex-row items-center gap-1.5">
+                    <Pressable
+                      onPress={() => startEdit(c)}
+                      className="h-9 w-9 items-center justify-center rounded-lg bg-secondary"
+                    >
+                      <Pencil size={14} color={colors.secondaryForeground} />
+                    </Pressable>
+                    <Pressable
+                      onPress={() => setConfirmDeleteId(c.id)}
+                      className="h-9 w-9 items-center justify-center rounded-lg bg-destructive/10"
+                    >
+                      <Trash2 size={14} color={colors.destructive} />
+                    </Pressable>
+                  </View>
                 </View>
                 <View className="mt-3">
                   <PhotoGallery

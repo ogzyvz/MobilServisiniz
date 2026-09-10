@@ -1312,6 +1312,10 @@ export async function updateComplaintApi(
   })
 }
 
+export async function deleteComplaintApi(workOrderId: string, complaintId: string) {
+  await api(`/api/workorders/${workOrderId}/complaints/${complaintId}`, { method: 'DELETE' })
+}
+
 export type StatusHistoryEntry = {
   id: string
   oldStatus?: string | null

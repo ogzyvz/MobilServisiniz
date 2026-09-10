@@ -1284,6 +1284,56 @@ public class DataService(TenantService tenant, IWebHostEnvironment env, PlanEnti
         return n > 0 ? id : null;
     }
 
+    public async Task<bool> DeleteComplaintAsync(Guid woId, Guid complaintId, Guid? userId = null)
+    {
+        var shopId = tenant.RequireShopId();
+        await using var conn = await tenant.OpenAsync();
+
+        var complaint = await conn.QuerySingleOrDefaultAsync<dynamic>(
+            "SELECT description FROM dbo.complaints WHERE id=@complaintId AND work_order_id=@woId AND shop_id=@shopId",
+            new { complaintId, woId, shopId });
+        if (complaint is null) return false;
+
+        // FK_woimg_complaint ON DELETE NO ACTION oldugu icin, sikayete bagli fotograflari
+        // (DB kaydi + fiziksel dosya) once temizlemeden sikayet silinemiyordu.
+        var imagePaths = (await conn.QueryAsync<string>(
+            "SELECT file_path FROM dbo.work_order_images WHERE complaint_id=@complaintId AND shop_id=@shopId",
+            new { complaintId, shopId })).ToList();
+
+        await conn.ExecuteAsync(
+            "DELETE FROM dbo.work_order_images WHERE complaint_id=@complaintId AND shop_id=@shopId",
+            new { complaintId, shopId });
+
+        var n = await conn.ExecuteAsync(
+            "DELETE FROM dbo.complaints WHERE id=@complaintId AND work_order_id=@woId AND shop_id=@shopId",
+            new { complaintId, woId, shopId });
+
+        if (n > 0)
+        {
+            foreach (var relPath in imagePaths)
+            {
+                try
+                {
+                    var absPath = Path.Combine(env.ContentRootPath, "wwwroot",
+                        relPath.Replace('/', Path.DirectorySeparatorChar));
+                    if (File.Exists(absPath)) File.Delete(absPath);
+                }
+                catch
+                {
+                    // Fiziksel dosya silinemezse yut: DB kaydi zaten temizlendi, tutarsizlik olusmaz.
+                }
+            }
+
+            var ctx = await GetWorkOrderContextAsync(conn, woId, shopId);
+            if (ctx is not null)
+                await ActivityLogService.LogAsync(
+                    conn, shopId, userId, "deleted", "complaint", complaintId,
+                    $"Şikayet silindi: {(string)complaint.description} — {ctx.Plate}",
+                    customerId: ctx.CustomerId, vehicleId: ctx.VehicleId);
+        }
+        return n > 0;
+    }
+
     private static readonly HashSet<string> ComplaintCategories = new(StringComparer.OrdinalIgnoreCase)
     {
         "motor", "fren", "elektrik", "klima", "suspansiyon",

@@ -118,6 +118,8 @@ import {
 
   updateComplaintApi,
 
+  deleteComplaintApi,
+
   openNewVisit,
 
   type AuthResult,
@@ -741,6 +743,12 @@ export function ServiceApp() {
 
   }
 
+  function deleteComplaint(id: string, complaintId: string) {
+
+    withWo(id, (woId) => deleteComplaintApi(woId, complaintId)).catch(reportError)
+
+  }
+
 
 
   async function performLogout() {
@@ -1250,6 +1258,7 @@ export function ServiceApp() {
             onBack={() => setView('vehicles')}
             onAddComplaint={(text, category) => addComplaint(selected.id, text, category)}
             onUpdateComplaint={(complaintId, text, category) => updateComplaint(selected.id, complaintId, text, category)}
+            onDeleteComplaint={(complaintId) => deleteComplaint(selected.id, complaintId)}
             onAddService={(s, force) => addService(selected.id, s, force)}
             onUpdateService={(sid, s) => updateService(selected.id, sid, s)}
             onDeleteService={(sid) => deleteService(selected.id, sid)}

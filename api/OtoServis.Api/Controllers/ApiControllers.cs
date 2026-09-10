@@ -541,6 +541,13 @@ public class WorkOrdersController(DataService data) : ControllerBase
         return ok ? NoContent() : NotFound();
     }
 
+    [HttpDelete("{id:guid}/complaints/{complaintId:guid}")]
+    public async Task<ActionResult> DeleteComplaint(Guid id, Guid complaintId)
+    {
+        var ok = await data.DeleteComplaintAsync(id, complaintId, User.GetUserId());
+        return ok ? NoContent() : NotFound();
+    }
+
     [HttpPost("{id:guid}/services")]
     public async Task<ActionResult> AddService(Guid id, [FromBody] AddServiceRequest req)
     {
