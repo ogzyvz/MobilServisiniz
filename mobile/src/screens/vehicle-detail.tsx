@@ -77,6 +77,7 @@ import type {
 import {
   absoluteImageUrl,
   createSupplier,
+  deleteWorkOrderImage,
   getCachedEntitlements,
   getShopPaymentInfo,
   getSupplierLedger,
@@ -2134,6 +2135,7 @@ function ComplaintTab({
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editText, setEditText] = useState('')
   const [editCategory, setEditCategory] = useState<ComplaintCategory>('diger')
+  const [editPhotoUri, setEditPhotoUri] = useState<string | null>(null)
   const [photosVersion, setPhotosVersion] = useState(0)
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
 
@@ -2157,17 +2159,25 @@ function ComplaintTab({
     setEditingId(c.id)
     setEditText(c.text)
     setEditCategory(c.category || 'diger')
+    setEditPhotoUri(null)
   }
 
-  function saveEdit() {
+  async function saveEdit() {
     if (!editText.trim()) {
       Alert.alert('Eksik Bilgi', 'Lütfen şikayet alanını doldurun.')
       return
     }
-    if (editingId) onUpdate(editingId, editText.trim(), editCategory)
+    if (editingId) {
+      onUpdate(editingId, editText.trim(), editCategory)
+      const uploaded = await attachPhotoAfterSave(vehicle.workOrderId, editPhotoUri, 'hasar', {
+        complaintId: editingId,
+      })
+      if (uploaded && editPhotoUri) setPhotosVersion((v) => v + 1)
+    }
     setEditingId(null)
     setEditText('')
     setEditCategory('diger')
+    setEditPhotoUri(null)
   }
 
   const groups = groupComplaintsByCategory(vehicle.complaints)
@@ -2209,9 +2219,33 @@ function ComplaintTab({
                     rows={4}
                   />
                 </View>
+                <View className="mt-3">
+                  <Text className="mb-2 text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                    Fotoğraflar
+                  </Text>
+                  <PhotoGallery
+                    workOrderId={vehicle.workOrderId}
+                    imageType="hasar"
+                    complaintId={c.id}
+                    refreshKey={photosVersion}
+                    editable
+                  />
+                  <View className="mt-2">
+                    <PhotoPicker
+                      uri={editPhotoUri}
+                      onPick={setEditPhotoUri}
+                      onClear={() => setEditPhotoUri(null)}
+                    />
+                  </View>
+                </View>
                 <View className="mt-3 flex-row gap-2">
-                  <SaveButton onPress={saveEdit} />
-                  <CancelButton onPress={() => setEditingId(null)} />
+                  <SaveButton onPress={() => void saveEdit()} />
+                  <CancelButton
+                    onPress={() => {
+                      setEditingId(null)
+                      setEditPhotoUri(null)
+                    }}
+                  />
                 </View>
               </View>
             ) : confirmDeleteId === c.id ? (
@@ -3763,6 +3797,7 @@ function PhotoGallery({
   serviceId,
   heading,
   refreshKey = 0,
+  editable = false,
 }: {
   workOrderId: string
   imageType: string
@@ -3774,11 +3809,35 @@ function PhotoGallery({
   heading?: string
   /** Yükleme sonrası galeriyi yeniden çekmek için artırılır. */
   refreshKey?: number
+  /** true ise her fotoğrafın üzerinde silme (X) rozeti gösterilir. */
+  editable?: boolean
 }) {
   const [images, setImages] = useState<WorkOrderImage[]>([])
   const [loaded, setLoaded] = useState(false)
   const [previewUri, setPreviewUri] = useState<string | null>(null)
   const [expanded, setExpanded] = useState(true)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+
+  function confirmDeleteImage(img: WorkOrderImage) {
+    Alert.alert('Fotoğraf silinsin mi?', 'Bu işlem geri alınamaz.', [
+      { text: 'İptal', style: 'cancel' },
+      {
+        text: 'Sil',
+        style: 'destructive',
+        onPress: async () => {
+          setDeletingId(img.id)
+          try {
+            await deleteWorkOrderImage(workOrderId, img.id)
+            setImages((prev) => prev.filter((i) => i.id !== img.id))
+          } catch (e) {
+            showError(e)
+          } finally {
+            setDeletingId(null)
+          }
+        },
+      },
+    ])
+  }
 
   useEffect(() => {
     let active = true
@@ -3835,13 +3894,26 @@ function PhotoGallery({
           {images.map((img) => {
             const uri = absoluteImageUrl(img.url)
             return (
-              <Pressable key={img.id} onPress={() => setPreviewUri(uri)}>
-                <Image
-                  source={{ uri }}
-                  resizeMode="cover"
-                  className="h-16 w-16 rounded-xl bg-secondary"
-                />
-              </Pressable>
+              <View key={img.id} className="relative">
+                <Pressable onPress={() => setPreviewUri(uri)} disabled={deletingId === img.id}>
+                  <Image
+                    source={{ uri }}
+                    resizeMode="cover"
+                    className="h-16 w-16 rounded-xl bg-secondary"
+                    style={deletingId === img.id ? { opacity: 0.4 } : undefined}
+                  />
+                </Pressable>
+                {editable ? (
+                  <Pressable
+                    onPress={() => confirmDeleteImage(img)}
+                    disabled={deletingId === img.id}
+                    className="absolute -right-1.5 -top-1.5 h-6 w-6 items-center justify-center rounded-full bg-destructive"
+                    style={{ elevation: 2 }}
+                  >
+                    <X size={13} color={colors.destructiveForeground} />
+                  </Pressable>
+                ) : null}
+              </View>
             )
           })}
         </ScrollView>

@@ -1374,6 +1374,10 @@ export async function getWorkOrderImages(workOrderId: string): Promise<WorkOrder
   return api<WorkOrderImage[]>(`/api/workorders/${workOrderId}/images`)
 }
 
+export async function deleteWorkOrderImage(workOrderId: string, imageId: string): Promise<void> {
+  await api(`/api/workorders/${workOrderId}/images/${imageId}`, { method: 'DELETE' })
+}
+
 export type RuhsatScanResult = {
   plate: string
   brand: string

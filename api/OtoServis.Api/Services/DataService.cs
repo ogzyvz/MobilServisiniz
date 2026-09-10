@@ -2270,6 +2270,36 @@ public class DataService(TenantService tenant, IWebHostEnvironment env, PlanEnti
             (Guid?)r.ComplaintId, (Guid?)r.ServiceId)).ToList();
     }
 
+    public async Task<bool> DeleteWorkOrderImageAsync(Guid woId, Guid imageId)
+    {
+        var shopId = tenant.RequireShopId();
+        await using var conn = await tenant.OpenAsync();
+
+        var relPath = await conn.ExecuteScalarAsync<string?>(
+            "SELECT file_path FROM dbo.work_order_images WHERE id=@imageId AND work_order_id=@woId AND shop_id=@shopId",
+            new { imageId, woId, shopId });
+        if (relPath is null) return false;
+
+        var n = await conn.ExecuteAsync(
+            "DELETE FROM dbo.work_order_images WHERE id=@imageId AND work_order_id=@woId AND shop_id=@shopId",
+            new { imageId, woId, shopId });
+
+        if (n > 0)
+        {
+            try
+            {
+                var absPath = Path.Combine(env.ContentRootPath, "wwwroot",
+                    relPath.Replace('/', Path.DirectorySeparatorChar));
+                if (File.Exists(absPath)) File.Delete(absPath);
+            }
+            catch
+            {
+                // Fiziksel dosya silinemezse yut: DB kaydi zaten temizlendi.
+            }
+        }
+        return n > 0;
+    }
+
     public async Task<AppUpdateInfoDto?> GetAppUpdateInfoAsync()
     {
         await using var conn = await tenant.OpenAsync();

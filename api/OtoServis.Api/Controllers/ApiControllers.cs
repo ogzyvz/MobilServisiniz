@@ -626,6 +626,13 @@ public class WorkOrdersController(DataService data) : ControllerBase
         return rows is null ? NotFound() : Ok(rows);
     }
 
+    [HttpDelete("{id:guid}/images/{imageId:guid}")]
+    public async Task<ActionResult> DeleteImage(Guid id, Guid imageId)
+    {
+        var ok = await data.DeleteWorkOrderImageAsync(id, imageId);
+        return ok ? NoContent() : NotFound();
+    }
+
     [HttpPatch("{id:guid}/services/{serviceId:guid}")]
     public async Task<ActionResult> UpdateService(Guid id, Guid serviceId, [FromBody] UpdateServiceRequest req)
     {
