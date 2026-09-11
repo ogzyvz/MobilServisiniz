@@ -2,7 +2,7 @@
   "expo": {
     "name": "MobilServisiniz",
     "slug": "mobilservisiniz",
-    "version": "1.0.30",
+    "version": "1.0.31",
     "orientation": "default",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -20,7 +20,7 @@
     },
     "android": {
       "package": "com.efogy.mobilservisiniz",
-      "versionCode": 34,
+      "versionCode": 35,
       "softwareKeyboardLayoutMode": "resize",
       "adaptiveIcon": {
         "backgroundColor": "#1e3a6e",
