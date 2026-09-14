@@ -1,13 +1,22 @@
 @echo off
-chcp 65001 >nul
+setlocal EnableExtensions
+rem Pencere hicbir sekilde beklenmeden kapanmasin: kendini "cmd /k" icinde
+rem yeniden baslatir. Boylece script icinde beklenmeyen/kritik bir hata
+rem (chcp, kod sayfasi, vb.) olsa da konsol acik kalir ve hata metni okunabilir.
+if not "%~1"=="RELAUNCHED" (
+    cmd /k ""%~f0" RELAUNCHED"
+    exit /b
+)
+
 echo ============================================
 echo  OtoServis GUNCELLEME (API + Admin + Platform)
 echo ============================================
 echo.
 
-if "%OTOSERVIS_DB_PASS%"=="" (
-    set /p OTOSERVIS_DB_PASS=Veritabani parolasi (otoservis_api kullanicisi): 
-)
+rem NOT: Bu satir bilerek tek satirlik "if komut" seklinde - parantezli blok
+rem icinde parantez karakteri gecen metin cmd.exe'nin blok ayracini
+rem sasirtip ": was unexpected at this time." hatasi verdiriyordu.
+if "%OTOSERVIS_DB_PASS%"=="" set /p OTOSERVIS_DB_PASS=Veritabani parolasi - otoservis_api kullanicisi: 
 
 set BASE_DIR=C:\OtoServis
 set API_DIR=%BASE_DIR%\api
@@ -119,7 +128,7 @@ if exist "%PLATFORM_ZIP%" (
     powershell -Command "Expand-Archive -Path '%PLATFORM_ZIP%' -DestinationPath '%PLATFORM_DIR%' -Force"
     echo OK
 ) else (
-    echo UYARI: %PLATFORM_ZIP% yok — Platform atlandi.
+    echo UYARI: %PLATFORM_ZIP% yok - Platform atlandi.
 )
 
 echo [7/7] Servisler baslatiliyor (IIS varsa App Pool, yoksa eski surec)...
