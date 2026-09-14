@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.HttpOverrides;
 using OtoServis.Platform.Services;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -29,6 +30,17 @@ builder.WebHost.ConfigureKestrel(opt =>
 });
 
 var app = builder.Build();
+
+// Cloudflare/IIS arkasinda calisiyoruz: gercek istek https olsa da IIS'e ulasan
+// baglanti bazen http gorunebilir, bu da login yonlendirmelerinin "http://" ile
+// olusturulmasina (guvensiz sayfa / olasi yonlendirme dongusu) yol aciyordu.
+// X-Forwarded-Proto/X-Forwarded-For'u okuyup Request.Scheme'i duzeltiyoruz.
+app.UseForwardedHeaders(new ForwardedHeadersOptions
+{
+    ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto,
+    KnownNetworks = { },
+    KnownProxies = { },
+});
 
 if (!app.Environment.IsDevelopment())
 {

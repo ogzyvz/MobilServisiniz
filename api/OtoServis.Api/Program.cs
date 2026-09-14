@@ -1,5 +1,6 @@
 using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi;
 using OtoServis.Api.Services;
@@ -67,6 +68,15 @@ builder.Services.AddCors(opt =>
 });
 
 var app = builder.Build();
+
+// Cloudflare/IIS arkasinda calisiyoruz: X-Forwarded-Proto/X-Forwarded-For'u okuyup
+// Request.Scheme'i duzeltiyoruz (Admin/Platform'daki ayni duzeltmeyle tutarli olsun).
+app.UseForwardedHeaders(new ForwardedHeadersOptions
+{
+    ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto,
+    KnownNetworks = { },
+    KnownProxies = { },
+});
 
 app.UseSwagger();
 app.UseSwaggerUI();
