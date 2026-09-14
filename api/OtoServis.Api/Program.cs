@@ -71,12 +71,18 @@ var app = builder.Build();
 
 // Cloudflare/IIS arkasinda calisiyoruz: X-Forwarded-Proto/X-Forwarded-For'u okuyup
 // Request.Scheme'i duzeltiyoruz (Admin/Platform'daki ayni duzeltmeyle tutarli olsun).
-app.UseForwardedHeaders(new ForwardedHeadersOptions
+var forwardedHeadersOptions = new ForwardedHeadersOptions
 {
     ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto,
-    KnownNetworks = { },
-    KnownProxies = { },
-});
+};
+// ONEMLI: "KnownNetworks = { }" / "KnownProxies = { }" koleksiyonu TEMIZLEMEZ,
+// sadece "hic eleman ekleme" demektir - varsayilan (sadece loopback) degerler
+// oldugu gibi kalir ve Cloudflare'den (loopback olmayan) gelen baglanti
+// guvenilmez sayilip X-Forwarded-* hic islenmez. Gercekten temizlemek icin
+// .Clear() gerekir.
+forwardedHeadersOptions.KnownNetworks.Clear();
+forwardedHeadersOptions.KnownProxies.Clear();
+app.UseForwardedHeaders(forwardedHeadersOptions);
 
 app.UseSwagger();
 app.UseSwaggerUI();
