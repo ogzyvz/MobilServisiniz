@@ -115,6 +115,16 @@ if exist "%BASE_DIR%\iis-setup\Restart-OtoServis.ps1" (
 echo [4/7] Yeni API dosyalari aciliyor...
 if not exist "%API_DIR%" mkdir "%API_DIR%"
 call :extract_zip "%API_ZIP%" "%API_DIR%"
+if not exist "%API_DIR%\appsettings.Production.json" (
+    echo.
+    echo *********************************************************************
+    echo  KRITIK UYARI: %API_DIR%\appsettings.Production.json YOK!
+    echo  Bu dosya olmadan Jwt:Key null gelir, API'nin TUMU (login dahil) 500
+    echo  verir. appsettings.Production.json.example'a bakip bu dosyayi elle
+    echo  olusturun, sonra App Pool'u yeniden baslatin.
+    echo *********************************************************************
+    echo.
+)
 
 echo [5/7] Yeni Admin dosyalari aciliyor...
 if not exist "%ADMIN_DIR%" mkdir "%ADMIN_DIR%"
