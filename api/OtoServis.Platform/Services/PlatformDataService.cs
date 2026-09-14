@@ -447,7 +447,7 @@ public class PlatformDataService(DbFactory db)
             @"SELECT latest_version AS LatestVersion,
                      latest_version_code AS LatestVersionCode,
                      min_version_code AS MinVersionCode,
-                     apk_url AS ApkUrl,
+                     store_url AS StoreUrl,
                      release_notes AS ReleaseNotes,
                      updated_at AS UpdatedAt
               FROM dbo.app_release WHERE id = 1");
@@ -466,7 +466,7 @@ public class PlatformDataService(DbFactory db)
               SET latest_version = @LatestVersion,
                   latest_version_code = @LatestVersionCode,
                   min_version_code = @MinVersionCode,
-                  apk_url = @ApkUrl,
+                  store_url = @StoreUrl,
                   release_notes = @ReleaseNotes,
                   updated_at = SYSUTCDATETIME()
               WHERE id = 1",

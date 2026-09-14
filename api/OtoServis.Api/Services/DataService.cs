@@ -2307,7 +2307,7 @@ public class DataService(TenantService tenant, IWebHostEnvironment env, PlanEnti
             @"SELECT latest_version AS LatestVersion,
                      latest_version_code AS LatestVersionCode,
                      min_version_code AS MinVersionCode,
-                     apk_url AS ApkUrl,
+                     store_url AS StoreUrl,
                      release_notes AS ReleaseNotes
               FROM dbo.app_release WHERE id = 1");
     }

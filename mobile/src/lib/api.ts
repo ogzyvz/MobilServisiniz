@@ -566,6 +566,36 @@ export async function fetchEntitlements(): Promise<PlanEntitlements | null> {
   }
 }
 
+export type AppUpdateInfo = {
+  latestVersion: string
+  latestVersionCode: number
+  minVersionCode: number
+  storeUrl?: string | null
+  releaseNotes?: string | null
+}
+
+/**
+ * Play Console sürüm kontrolü — kimlik doğrulama gerektirmez, uygulama açılışında
+ * (giriş ekranından önce) çağrılabilir. Hata durumunda `null` döner; çağıran taraf
+ * güncelleme kontrolünü sessizce atlamalı (ağ hatası kullanıcıyı kilitlemez).
+ */
+export async function fetchAppUpdateInfo(): Promise<AppUpdateInfo | null> {
+  try {
+    const raw = await api<any>('/api/app/update-info', {}, false)
+    const latestVersionCode = Number(raw?.latestVersionCode ?? raw?.LatestVersionCode ?? 0)
+    if (!latestVersionCode) return null
+    return {
+      latestVersion: String(raw?.latestVersion ?? raw?.LatestVersion ?? ''),
+      latestVersionCode,
+      minVersionCode: Number(raw?.minVersionCode ?? raw?.MinVersionCode ?? 0),
+      storeUrl: raw?.storeUrl ?? raw?.StoreUrl ?? null,
+      releaseNotes: raw?.releaseNotes ?? raw?.ReleaseNotes ?? null,
+    }
+  } catch {
+    return null
+  }
+}
+
 export async function registerUser(): Promise<AuthResult> {
   return {
     ok: false,

@@ -10,13 +10,16 @@
 
 <div class="card border-0 shadow-sm">
     <div class="card-body">
-        <h1 class="h4 mb-1">Mobil APK sürümü</h1>
+        <h1 class="h4 mb-1">Mobil uygulama sürümü</h1>
         <p class="text-muted small mb-4">
-            Kullanıcılar uygulama açılışında bu bilgilere göre güncelleme uyarısı veya zorunlu güncelleme görür.
-            APK yüklenince <code>wwwroot/releases/MobilServisiniz.apk</code> üzerine yazılır.
+            Uygulama açılışında yüklü sürüm (Android version code) burada girilen
+            <code>Minimum zorunlu version code</code>'un altındaysa kullanıcı Play Store'a
+            yönlendiren, kapatılamayan bir "Güncelleme Gerekli" ekranı görür. Yüklü sürüm
+            <code>Version code</code>'un altında ama minimumun üstündeyse, kapatılabilir bir
+            "Yeni sürüm mevcut" uyarısı gösterilir.
         </p>
 
-        <form asp-action="Index" method="post" enctype="multipart/form-data">
+        <form asp-action="Index" method="post">
             @Html.AntiForgeryToken()
             <div asp-validation-summary="ModelOnly" class="text-danger mb-3"></div>
 
@@ -43,13 +46,10 @@
                     </div>
                 </div>
                 <div class="col-12">
-                    <label asp-for="ApkUrl" class="form-label"></label>
-                    <input asp-for="ApkUrl" class="form-control" />
-                    <div class="form-text">APK yüklediğinizde bu alan otomatik güncellenir.</div>
-                </div>
-                <div class="col-12">
-                    <label class="form-label">APK dosyası</label>
-                    <input type="file" name="apkFile" accept=".apk,application/vnd.android.package-archive" class="form-control" />
+                    <label asp-for="StoreUrl" class="form-label"></label>
+                    <input asp-for="StoreUrl" class="form-control" placeholder="https://play.google.com/store/apps/details?id=com.efogy.mobilservisiniz" />
+                    <span asp-validation-for="StoreUrl" class="text-danger small"></span>
+                    <div class="form-text">"Güncelle" butonuna basıldığında açılacak Play Store sayfası.</div>
                 </div>
                 <div class="col-12">
                     <label asp-for="ReleaseNotes" class="form-label"></label>

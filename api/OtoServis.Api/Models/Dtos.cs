@@ -298,7 +298,7 @@ public record AppUpdateInfoDto(
     string LatestVersion,
     int LatestVersionCode,
     int MinVersionCode,
-    string? ApkUrl,
+    string? StoreUrl,
     string? ReleaseNotes);
 
 public record UpdateShopPaymentInfoRequest(

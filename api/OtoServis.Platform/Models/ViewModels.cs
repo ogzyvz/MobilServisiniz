@@ -216,9 +216,9 @@ public class AppReleaseForm
     [Range(1, int.MaxValue)]
     public int MinVersionCode { get; set; }
 
-    [Display(Name = "APK URL")]
+    [Display(Name = "Play Store URL")]
     [StringLength(500)]
-    public string? ApkUrl { get; set; }
+    public string? StoreUrl { get; set; }
 
     [Display(Name = "Sürüm notları")]
     [StringLength(1000)]
