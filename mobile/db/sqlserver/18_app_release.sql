@@ -32,19 +32,21 @@ ELSE
     PRINT N'app_release zaten var.';
 GO
 
+-- NOT: apk_url kolonu sonradan store_url olarak yeniden adlandirildi (bkz. 26 nolu
+-- migration). Asagidaki INSERT'i dinamik SQL ile calistiriyoruz; cunku statik bir
+-- INSERT icinde apk_url'e referans verirsek, bu satir hicbir zaman calismasa (id=1
+-- zaten varsa) bile SQL Server batch'i derlerken kolon adini kontrol eder ve kolon
+-- artik store_url ise "Invalid column name 'apk_url'" hatasi verir.
 IF NOT EXISTS (SELECT 1 FROM dbo.app_release WHERE id = 1)
 BEGIN
-    INSERT INTO dbo.app_release (
-        id, latest_version, latest_version_code, min_version_code, apk_url, release_notes
-    )
-    VALUES (
-        1,
-        N'1.0.19',
-        20,
-        20,
-        N'http://37.148.211.243:5280/releases/MobilServisiniz.apk',
-        N'Mevcut surum'
-    );
+    DECLARE @urlCol sysname = CASE
+        WHEN COL_LENGTH('dbo.app_release', 'store_url') IS NOT NULL THEN N'store_url'
+        ELSE N'apk_url'
+    END;
+    DECLARE @insertSql nvarchar(max) = N'
+        INSERT INTO dbo.app_release (id, latest_version, latest_version_code, min_version_code, ' + QUOTENAME(@urlCol) + N', release_notes)
+        VALUES (1, N''1.0.19'', 20, 20, N''http://37.148.211.243:5280/releases/MobilServisiniz.apk'', N''Mevcut surum'');';
+    EXEC sp_executesql @insertSql;
     PRINT N'app_release seed (1.0.19 / code 20) eklendi.';
 END
 ELSE
