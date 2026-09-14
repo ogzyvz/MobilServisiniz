@@ -37,7 +37,7 @@ function Wait-AppPoolFullyStopped {
         Start-Sleep -Milliseconds 500
     }
 
-    # 2) Asil kilit sorunu w3wp.exe surecinin tam kapanmamasidir — o surecin de
+    # 2) Asil kilit sorunu w3wp.exe surecinin tam kapanmamasidir - o surecin de
     #    gercekten bitmesini bekle (dosya kilitleri ancak o zaman serbest kalir).
     $sw.Restart()
     while ($sw.Elapsed.TotalSeconds -lt $TimeoutSec) {
@@ -88,7 +88,7 @@ function Start-Services {
         }
     } else {
         Write-Host "IIS App Pool bulunamadi, eski dotnet surecleri ile baslatiliyor..." -ForegroundColor Yellow
-        Write-Host "  (Bu durum IIS gecisi henuz yapilmadigini gosterir — bkz. publish\iis-setup\)" -ForegroundColor DarkYellow
+        Write-Host "  (Bu durum IIS gecisi henuz yapilmadigini gosterir - bkz. publish\iis-setup\)" -ForegroundColor DarkYellow
         $env:ASPNETCORE_ENVIRONMENT = "Production"
         foreach ($svc in $legacy) {
             if (Test-Path $svc.Path) {

@@ -1,5 +1,5 @@
 # 04-Cutover.ps1
-# Gecis anini gerceklestirir: eski standalone "dotnet X.dll" konsol süreçlerini durdurur,
+# Gecis anini gerceklestirir: eski standalone "dotnet X.dll" konsol sureclerini durdurur,
 # ardindan IIS App Pool'larini/Site'larini baslatir. Boylece hem eski IP:port (5280/5281/5282)
 # hem yeni https://api.<domain> adresleri IIS uzerinden ayni anda calisir hale gelir.
 #
