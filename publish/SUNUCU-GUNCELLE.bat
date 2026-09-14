@@ -114,19 +114,16 @@ if exist "%BASE_DIR%\iis-setup\Restart-OtoServis.ps1" (
 
 echo [4/7] Yeni API dosyalari aciliyor...
 if not exist "%API_DIR%" mkdir "%API_DIR%"
-powershell -Command "Expand-Archive -Path '%API_ZIP%' -DestinationPath '%API_DIR%' -Force"
-echo OK
+call :extract_zip "%API_ZIP%" "%API_DIR%"
 
 echo [5/7] Yeni Admin dosyalari aciliyor...
 if not exist "%ADMIN_DIR%" mkdir "%ADMIN_DIR%"
-powershell -Command "Expand-Archive -Path '%ADMIN_ZIP%' -DestinationPath '%ADMIN_DIR%' -Force"
-echo OK
+call :extract_zip "%ADMIN_ZIP%" "%ADMIN_DIR%"
 
 echo [6/7] Yeni Platform dosyalari aciliyor...
 if exist "%PLATFORM_ZIP%" (
     if not exist "%PLATFORM_DIR%" mkdir "%PLATFORM_DIR%"
-    powershell -Command "Expand-Archive -Path '%PLATFORM_ZIP%' -DestinationPath '%PLATFORM_DIR%' -Force"
-    echo OK
+    call :extract_zip "%PLATFORM_ZIP%" "%PLATFORM_DIR%"
 ) else (
     echo UYARI: %PLATFORM_ZIP% yok - Platform atlandi.
 )
@@ -162,6 +159,29 @@ echo  Admin:    https://panel.mobilservisiniz.com          (eski: http://37.148.
 echo  Platform: https://yonetim.mobilservisiniz.com        (eski: http://37.148.211.243:5282)
 echo ============================================
 pause
+exit /b 0
+
+:extract_zip
+rem IIS App Pool durdurulduktan sonra w3wp.exe surecinin dosya kilitlerini
+rem birakmasi bazen birkac saniye surebiliyor ("Access to the path ... is denied"
+rem hatasi). Bu yuzden acmayi birkac kez, aralarla deneriz.
+set _EXTRACT_TRY=0
+:extract_zip_retry
+set /a _EXTRACT_TRY+=1
+rem $ErrorActionPreference='Stop' sart: yoksa Expand-Archive icindeki kilitli
+rem dosya Remove-Item hatalari sessizce yutulur ve powershell 0 ile doner,
+rem boylece asagidaki "errorlevel" kontrolu hicbir zaman tetiklenmez.
+powershell -Command "$ErrorActionPreference='Stop'; Expand-Archive -Path '%~1' -DestinationPath '%~2' -Force" 2>nul
+if errorlevel 1 (
+    if %_EXTRACT_TRY% LSS 5 (
+        echo   ... dosyalar hala kilitli olabilir, 3 sn sonra tekrar denenecek deneme %_EXTRACT_TRY%/5
+        timeout /t 3 /nobreak >nul
+        goto extract_zip_retry
+    )
+    echo UYARI: %~1 acilamadi - bazi dosyalar kilitli kalmis olabilir. Servisi durdurup elle tekrar deneyin.
+) else (
+    echo OK
+)
 exit /b 0
 
 :run_sql

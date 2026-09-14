@@ -26,16 +26,45 @@ if ($iisAvailable) {
     $iisAvailable = Test-Path "IIS:\AppPools\$($pools[0])"
 }
 
+function Wait-AppPoolFullyStopped {
+    param([string]$PoolName, [int]$TimeoutSec = 20)
+
+    # 1) App Pool durumu "Stopped" olana kadar bekle (Stop-WebAppPool asenkrondur).
+    $sw = [Diagnostics.Stopwatch]::StartNew()
+    while ($sw.Elapsed.TotalSeconds -lt $TimeoutSec) {
+        $state = (Get-WebAppPoolState -Name $PoolName -ErrorAction SilentlyContinue).Value
+        if ($state -eq 'Stopped') { break }
+        Start-Sleep -Milliseconds 500
+    }
+
+    # 2) Asil kilit sorunu w3wp.exe surecinin tam kapanmamasidir — o surecin de
+    #    gercekten bitmesini bekle (dosya kilitleri ancak o zaman serbest kalir).
+    $sw.Restart()
+    while ($sw.Elapsed.TotalSeconds -lt $TimeoutSec) {
+        $procs = Get-CimInstance Win32_Process -Filter "Name='w3wp.exe'" -ErrorAction SilentlyContinue |
+            Where-Object { $_.CommandLine -match [regex]::Escape($PoolName) }
+        if (-not $procs) { return }
+        Start-Sleep -Milliseconds 500
+    }
+
+    # 3) Hala kapanmadiysa (nadir), sureci zorla sonlandir ki dosya kilitleri kesin acilsin.
+    Write-Host "  UYARI: $PoolName icin w3wp.exe zamaninda kapanmadi, zorla sonlandiriliyor..." -ForegroundColor Yellow
+    Get-CimInstance Win32_Process -Filter "Name='w3wp.exe'" -ErrorAction SilentlyContinue |
+        Where-Object { $_.CommandLine -match [regex]::Escape($PoolName) } |
+        ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+    Start-Sleep -Seconds 1
+}
+
 function Stop-Services {
     if ($iisAvailable) {
         Write-Host "IIS App Pool'lari durduruluyor..." -ForegroundColor Cyan
         foreach ($p in $pools) {
             if (Test-Path "IIS:\AppPools\$p") {
                 Stop-WebAppPool -Name $p -ErrorAction SilentlyContinue
-                Write-Host "  $p durduruldu"
+                Wait-AppPoolFullyStopped -PoolName $p
+                Write-Host "  $p durduruldu (surec de kapandi)"
             }
         }
-        Start-Sleep -Seconds 2
     } else {
         Write-Host "IIS App Pool bulunamadi, eski dotnet surecleri durduruluyor..." -ForegroundColor Yellow
         foreach ($svc in $legacy) {
