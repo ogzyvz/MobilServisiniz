@@ -119,7 +119,7 @@ if not exist "%API_DIR%\appsettings.Production.json" (
     echo.
     echo *********************************************************************
     echo  KRITIK UYARI: %API_DIR%\appsettings.Production.json YOK!
-    echo  Bu dosya olmadan Jwt:Key null gelir, API'nin TUMU (login dahil) 500
+    echo  Bu dosya olmadan Jwt:Key null gelir, API'nin TUMU - login dahil - 500
     echo  verir. appsettings.Production.json.example'a bakip bu dosyayi elle
     echo  olusturun, sonra App Pool'u yeniden baslatin.
     echo *********************************************************************
